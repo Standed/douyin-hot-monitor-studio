@@ -1,0 +1,26 @@
+# Dependencies and builds
+node_modules/
+dist/
+dist-ssr/
+__pycache__/
+*.pyc
+
+# Local secrets
+.env
+.env.local
+*.local
+
+# Local config and runtime data
+douyin-monitor/config.json
+douyin-monitor-output/
+runs/
+assets/
+state.json
+*.log
+*.err.log
+
+# OS and editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

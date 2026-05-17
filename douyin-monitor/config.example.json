@@ -1,0 +1,26 @@
+{
+  "local_api_base": "http://127.0.0.1:8091",
+  "output_dir": "../../douyin-monitor-output",
+  "state_path": "../../douyin-monitor-output/state.json",
+  "account_monitor": {
+    "count_per_account": 2,
+    "download_video": false,
+    "transcribe": false,
+    "accounts": [
+      {
+        "name": "example account",
+        "sec_user_id": "replace_with_douyin_sec_user_id"
+      }
+    ]
+  },
+  "low_fan_hits": {
+    "fans_num": 10000,
+    "likes": 1000,
+    "collect": 500,
+    "comment": 500,
+    "share": 500,
+    "count": 20,
+    "max_pages": 2,
+    "route": 2
+  }
+}
