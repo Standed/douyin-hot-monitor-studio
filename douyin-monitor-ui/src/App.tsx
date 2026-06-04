@@ -2,8 +2,8 @@ import { startTransition, useEffect, useMemo, useState, type ReactNode } from 'r
 import {
   AlertTriangle,
   Archive,
-  Bot,
   Captions,
+  ChartNoAxesColumnIncreasing,
   CheckCircle2,
   Clock3,
   Command,
@@ -13,19 +13,19 @@ import {
   Gauge,
   Heart,
   History,
+  Info,
   KeyRound,
   LayoutList,
   Loader2,
   LogIn,
   Moon,
   Play,
-  Plus,
   RefreshCw,
   Search,
-  Send,
   Settings2,
   ShieldCheck,
   Sparkles,
+  Server,
   Sun,
   Users,
   Video,
@@ -53,6 +53,50 @@ type AccountSummary = {
   secUserId: string
 }
 
+type IntegrationState = {
+  configured: boolean
+  masked: string
+}
+
+type TranscriptionSettings = {
+  provider: 'lemonfox' | 'faster-whisper' | 'whisper'
+  language: string
+  localModel: string
+  localDevice: string
+  localComputeType: string
+  prompt: string
+  providers?: {
+    lemonfox: ProviderStatus
+    fasterWhisper: ProviderStatus
+    whisper: ProviderStatus
+  }
+}
+
+type RuntimeSettings = {
+  localApiBase: string
+  pythonBin: string
+  monitorDir: string
+}
+
+type ParserConfigStatus = {
+  configured: boolean
+  writable: boolean
+  path: string
+  detail: string
+}
+
+type ProviderStatus = {
+  available: boolean
+  detail: string
+}
+
+type ThresholdSettings = {
+  thresholds: ConfigSummary['thresholds']
+  defaultLowFan: ConfigSummary['defaultLowFan']
+}
+
+type RunningAction = 'account' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | null
+
 type ConfigSummary = {
   accountCount: number
   accounts: AccountSummary[]
@@ -72,6 +116,13 @@ type ConfigSummary = {
   }
   hasTikhubKey: boolean
   hasLemonfoxKey: boolean
+  integrations?: {
+    tikhub: IntegrationState
+    lemonfox: IntegrationState
+    transcription: TranscriptionSettings
+    runtime?: RuntimeSettings
+    parserConfig?: ParserConfigStatus
+  }
 }
 
 type ReportFile = {
@@ -99,6 +150,8 @@ type ReportRow = {
   video_url?: string
   local_video_path?: string
   transcript_path?: string
+  transcript_provider?: string
+  transcript_status?: string
   transcript_error?: string
   download_error?: string
   viral_score?: number
@@ -110,6 +163,8 @@ type DashboardData = {
   config: ConfigSummary
   reports: ReportFile[]
   latestRows: ReportRow[]
+  latestLowfanRows: ReportRow[]
+  latestAccountRows: ReportRow[]
   state: Record<string, unknown>
 }
 
@@ -143,20 +198,138 @@ const defaultData: DashboardData = {
     },
     defaultLowFan: {
       count: 20,
-      pages: 1,
+      pages: 2,
       route: 2,
     },
     hasTikhubKey: false,
     hasLemonfoxKey: false,
+    integrations: {
+      tikhub: { configured: false, masked: '' },
+      lemonfox: { configured: false, masked: '' },
+      transcription: {
+        provider: 'faster-whisper',
+        language: 'zh',
+        localModel: 'small',
+        localDevice: 'auto',
+        localComputeType: 'int8',
+        prompt: '请使用标点符号：，。、；：？！',
+        providers: {
+          lemonfox: { available: false, detail: '需要配置 LEMONFOX_API_KEY' },
+          fasterWhisper: { available: false, detail: '当前 Python 环境缺少 faster-whisper' },
+          whisper: { available: false, detail: '当前 Python 环境缺少 openai-whisper' },
+        },
+      },
+      runtime: {
+        localApiBase: 'http://127.0.0.1:8091',
+        pythonBin: 'python3',
+        monitorDir: '../douyin-monitor',
+      },
+      parserConfig: {
+        configured: false,
+        writable: false,
+        path: '',
+        detail: 'DOUYIN_WEB_CONFIG 未配置',
+      },
+    },
   },
   reports: [],
   latestRows: [],
+  latestLowfanRows: [],
+  latestAccountRows: [],
   state: {},
 }
 
 const publishOptions = ['不限', '最近一天', '最近一周', '最近半年']
 const durationOptions = ['不限', '1 分钟以内', '1-5 分钟', '5 分钟以上']
 const sortOptions = ['综合排序', '最多点赞', '最新发布']
+const providerOptions = [
+  { label: '本地 faster-whisper', value: 'faster-whisper' },
+  { label: '本地 Whisper', value: 'whisper' },
+  { label: 'Lemonfox 云端', value: 'lemonfox' },
+]
+
+type PageId = 'overview' | 'lowfan' | 'accounts' | 'settings' | 'reports' | 'ops' | 'about'
+
+const pageIds: PageId[] = ['overview', 'lowfan', 'accounts', 'settings', 'reports', 'ops', 'about']
+
+const navItems: Array<{ id: PageId; icon: IconComponent; label: string; desc: string }> = [
+  { id: 'overview', icon: Zap, label: '精选总览', desc: '素材流和运行状态' },
+  { id: 'lowfan', icon: Search, label: '低粉爆款', desc: '关键词发现' },
+  { id: 'accounts', icon: LayoutList, label: '对标账号', desc: '账号追踪' },
+  { id: 'settings', icon: Settings2, label: '接口配置', desc: 'TikHub / Lemonfox' },
+  { id: 'reports', icon: FileText, label: '归档报告', desc: 'JSON / CSV / MD' },
+  { id: 'ops', icon: ShieldCheck, label: '运行诊断', desc: '服务和错误' },
+  { id: 'about', icon: Heart, label: '使用说明', desc: '用途和替代方案' },
+]
+
+const pageCopy: Record<PageId, { title: string; eyebrow: string; description: string }> = {
+  overview: {
+    title: '抖音爆款监控台',
+    eyebrow: '运营素材雷达',
+    description: '汇总低粉爆款、对标账号、接口状态和最近归档，适合运营同事每天扫一遍。',
+  },
+  lowfan: {
+    title: '低粉爆款搜索',
+    eyebrow: 'Keyword Discovery',
+    description: '按关键词搜索粉丝不高但互动异常好的作品，用来找选题、封面、口播和账号打法。',
+  },
+  accounts: {
+    title: '对标账号监控',
+    eyebrow: 'Benchmark Watch',
+    description: '按配置里的 sec_user_id 抓取对标账号最新作品，适合固定账号池的日常巡检。',
+  },
+  settings: {
+    title: '接口与转写配置',
+    eyebrow: 'Integrations',
+    description: '配置 TikHub、Lemonfox、抖音登录态和本地转写引擎，避免运行前再改环境变量。',
+  },
+  reports: {
+    title: '归档报告',
+    eyebrow: 'Archive',
+    description: '查看最近生成的 JSON、CSV 和 Markdown 报告，确认每次搜索和监控的产物位置。',
+  },
+  ops: {
+    title: '运行诊断',
+    eyebrow: 'Ops',
+    description: '查看解析服务、最近命令输出、接口可用性和账号监控错误。',
+  },
+  about: {
+    title: '使用说明',
+    eyebrow: 'Playbook',
+    description: '说明 TikHub、Lemonfox 分别做什么，以及没有它们时可以怎么替代。',
+  },
+}
+
+const learningCards = [
+  {
+    title: 'TikHub',
+    body: 'TikHub 在这里负责抖音搜索和视频数据接口，低粉爆款搜索主要靠它按关键词拿到作品、作者粉丝数、点赞评论收藏转发等数据。',
+    cost: '官方 pricing 页显示有新账号免费请求额度，正式使用按请求或套餐计费，具体价格以官网为准。',
+    alternatives: '可替代方式：自建抖音采集/爬虫服务、接入其他短视频数据 API、用人工表格导入候选作品。自建方案控制力更强，但维护成本和风控压力更高。',
+  },
+  {
+    title: 'Lemonfox',
+    body: 'Lemonfox 在这里负责云端语音转文字。账号监控开启“提取口播文稿”后，可以把视频口播转成文稿，方便拆标题、脚本结构和表达方式。',
+    cost: '官方首页显示有免费试用，但正式转写按月/积分计费，云端批量转写前要看账单和额度。',
+    alternatives: '可替代方式：本地 faster-whisper、本地 openai-whisper、其他云转写服务或人工听写。本地方案更可控，但需要下载视频、配置模型和处理机器性能。',
+  },
+  {
+    title: 'Douyin_TikTok_Download_API',
+    body: '这是本项目编排进 Docker Compose 的内置解析服务能力，负责对标账号作品列表、无水印下载和需要登录态的抖音接口。',
+    cost: 'FastAPI 框架本身开源免费，但私有化部署仍有服务器、代理、Cookie 维护、风控和人员维护成本。',
+    alternatives: '完整上游项目仍可作为高级配置入口，用来单独管理 Cookie、代理和部署细节；也可以接入其他兼容本地解析 API、商业短视频数据接口，或先用人工导入链接。',
+  },
+]
+
+type ThemeMode = 'dark' | 'light'
+
+function getInitialPage(): PageId {
+  if (typeof window === 'undefined') return 'overview'
+  const pathPage = window.location.pathname.replace(/^\/+/, '') as PageId
+  if (pageIds.includes(pathPage)) return pathPage
+  const hashPage = window.location.hash.replace('#', '') as PageId
+  return pageIds.includes(hashPage) ? hashPage : 'overview'
+}
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -189,6 +362,12 @@ function formatClock(value?: string) {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '0 KB'
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`
+  return `${Math.max(1, Math.round(value / 1024))} KB`
+}
+
 function parseRunOutput(result?: RunResult) {
   if (!result?.stdout) return null
   const start = result.stdout.indexOf('{')
@@ -217,10 +396,37 @@ function createRunError(command: string, error: unknown): RunResult {
   }
 }
 
+function resultModeMatchesPage(mode: 'latest' | 'lowfan' | 'account', page: PageId) {
+  if (page === 'overview') return true
+  if (page === 'lowfan') return mode === 'lowfan'
+  if (page === 'accounts') return mode === 'account'
+  return false
+}
+
+function normalizeIntegrations(config: ConfigSummary): NonNullable<ConfigSummary['integrations']> {
+  const fallback = defaultData.config.integrations!
+  const incoming = config.integrations
+  return {
+    tikhub: incoming?.tikhub || fallback.tikhub,
+    lemonfox: incoming?.lemonfox || fallback.lemonfox,
+    transcription: {
+      ...fallback.transcription,
+      ...incoming?.transcription,
+      providers: {
+        lemonfox: incoming?.transcription?.providers?.lemonfox || fallback.transcription.providers!.lemonfox,
+        fasterWhisper: incoming?.transcription?.providers?.fasterWhisper || fallback.transcription.providers!.fasterWhisper,
+        whisper: incoming?.transcription?.providers?.whisper || fallback.transcription.providers!.whisper,
+      },
+    },
+    runtime: incoming?.runtime || fallback.runtime,
+    parserConfig: incoming?.parserConfig || fallback.parserConfig,
+  }
+}
+
 function App() {
   const [data, setData] = useState<DashboardData>(defaultData)
   const [loading, setLoading] = useState(true)
-  const [running, setRunning] = useState<'account' | 'lowfan' | 'session' | null>(null)
+  const [running, setRunning] = useState<RunningAction>(null)
   const [lastRun, setLastRun] = useState<RunResult | undefined>()
   const [keyword, setKeyword] = useState('AI智能体')
   const [publishTime, setPublishTime] = useState('最近一周')
@@ -229,6 +435,11 @@ function App() {
   const [route, setRoute] = useState('2')
   const [pages, setPages] = useState(1)
   const [count, setCount] = useState(20)
+  const [fansNum, setFansNum] = useState(10000)
+  const [minLikes, setMinLikes] = useState(1000)
+  const [minCollect, setMinCollect] = useState(500)
+  const [minComment, setMinComment] = useState(500)
+  const [minShare, setMinShare] = useState(500)
   const [maxAccounts, setMaxAccounts] = useState<'3' | 'all'>('3')
   const [limit, setLimit] = useState(2)
   const [timeout, setTimeoutValue] = useState(18)
@@ -236,14 +447,35 @@ function App() {
   const [downloadVideo, setDownloadVideo] = useState(false)
   const [transcribe, setTranscribe] = useState(false)
   const [sessionid, setSessionid] = useState('')
-  const [activeTab, setActiveTab] = useState('精选')
+  const [tikhubKey, setTikhubKey] = useState('')
+  const [lemonfoxKey, setLemonfoxKey] = useState('')
+  const [localApiBase, setLocalApiBase] = useState('')
+  const [pythonBin, setPythonBin] = useState('')
+  const [monitorDir, setMonitorDir] = useState('')
+  const [transcriptionProvider, setTranscriptionProvider] = useState('faster-whisper')
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState('zh')
+  const [localModel, setLocalModel] = useState('small')
+  const [localDevice, setLocalDevice] = useState('auto')
+  const [localComputeType, setLocalComputeType] = useState('int8')
+  const [transcriptionPrompt, setTranscriptionPrompt] = useState('请使用标点符号：，。、；：？！')
+  const [activePage, setActivePage] = useState<PageId>(getInitialPage)
   const [resultMode, setResultMode] = useState<'latest' | 'lowfan' | 'account'>('latest')
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    if (typeof window === 'undefined') return 'dark'
+    return window.localStorage.getItem('douyin-monitor-theme') === 'light' ? 'light' : 'dark'
+  })
 
   const latestReport = data.reports[0]
+  const integrations = normalizeIntegrations(data.config)
+  const activeTranscription = integrations.transcription
+  const runtimeSettings = integrations.runtime
+  const providerStatus = getProviderStatus(activeTranscription)
   const parsedRun = useMemo(() => parseRunOutput(lastRun), [lastRun])
   const lastErrors = getLastErrors(data.state)
   const visibleAccounts = maxAccounts === 'all' ? data.config.accounts : data.config.accounts.slice(0, Number(maxAccounts))
-  const displayRows = lastRun?.rows?.length ? lastRun.rows : data.latestRows
+  const pageRows = activePage === 'lowfan' ? data.latestLowfanRows : activePage === 'accounts' ? data.latestAccountRows : data.latestRows
+  const displayRows = lastRun?.rows?.length && resultModeMatchesPage(resultMode, activePage) ? lastRun.rows : pageRows
+  const currentPage = pageCopy[activePage]
 
   const feedItems = displayRows.length
     ? displayRows
@@ -288,6 +520,7 @@ function App() {
       })
       setLastRun(result)
       setResultMode('account')
+      setActivePage('accounts')
       await refresh()
     } catch (error) {
       setLastRun(createRunError('POST /api/run/account', error))
@@ -314,6 +547,7 @@ function App() {
       })
       setLastRun(result)
       setResultMode('lowfan')
+      setActivePage('lowfan')
       await refresh()
     } catch (error) {
       setLastRun(createRunError('POST /api/run/lowfan', error))
@@ -345,6 +579,128 @@ function App() {
     }
   }
 
+  async function saveIntegrations() {
+    setRunning('integrations')
+    try {
+      const result = await api<{ ok: boolean; integrations: ConfigSummary['integrations'] }>('/api/settings/integrations', {
+        method: 'POST',
+        body: JSON.stringify({
+          tikhubKey,
+          lemonfoxKey,
+          transcription: {
+            provider: transcriptionProvider,
+            language: transcriptionLanguage,
+            localModel,
+            localDevice,
+            localComputeType,
+            prompt: transcriptionPrompt,
+          },
+        }),
+      })
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/settings/integrations',
+        code: result.ok ? 0 : 1,
+        stdout: '配置已保存',
+        stderr: '',
+      })
+      setTikhubKey('')
+      setLemonfoxKey('')
+      await refresh()
+      if (result.integrations) {
+        setData((current) => ({
+          ...current,
+          config: {
+            ...current.config,
+            hasTikhubKey: result.integrations!.tikhub.configured,
+            hasLemonfoxKey: result.integrations!.lemonfox.configured,
+            integrations: result.integrations,
+          },
+        }))
+      }
+    } catch (error) {
+      setLastRun(createRunError('POST /api/settings/integrations', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  async function saveRuntime() {
+    setRunning('runtime')
+    try {
+      const result = await api<{ ok: boolean; integrations: ConfigSummary['integrations']; error?: string }>('/api/settings/runtime', {
+        method: 'POST',
+        body: JSON.stringify({
+          localApiBase,
+          pythonBin,
+          monitorDir,
+        }),
+      })
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/settings/runtime',
+        code: result.ok ? 0 : 1,
+        stdout: result.ok ? '后台配置已保存' : '',
+        stderr: result.error || '',
+      })
+      await refresh()
+      if (result.integrations) {
+        setData((current) => ({
+          ...current,
+          config: {
+            ...current.config,
+            integrations: result.integrations,
+          },
+        }))
+      }
+    } catch (error) {
+      setLastRun(createRunError('POST /api/settings/runtime', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  async function saveThresholds() {
+    setRunning('thresholds')
+    try {
+      const result = await api<{ ok: boolean } & ThresholdSettings>('/api/settings/thresholds', {
+        method: 'POST',
+        body: JSON.stringify({
+          fansNum,
+          likes: minLikes,
+          collect: minCollect,
+          comment: minComment,
+          share: minShare,
+          count,
+          pages,
+          route: Number(route),
+        }),
+      })
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/settings/thresholds',
+        code: result.ok ? 0 : 1,
+        stdout: '监控阈值已保存',
+        stderr: '',
+      })
+      setData((current) => ({
+        ...current,
+        config: {
+          ...current.config,
+          thresholds: result.thresholds,
+          defaultLowFan: result.defaultLowFan,
+        },
+      }))
+      setCount(result.defaultLowFan.count)
+      setPages(result.defaultLowFan.pages)
+      setRoute(String(result.defaultLowFan.route))
+    } catch (error) {
+      setLastRun(createRunError('POST /api/settings/thresholds', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -356,7 +712,27 @@ function App() {
           setCount(dashboard.config.defaultLowFan.count || 20)
           setPages(dashboard.config.defaultLowFan.pages || 1)
           setRoute(String(dashboard.config.defaultLowFan.route || 1))
+          setFansNum(dashboard.config.thresholds.fans_num || 10000)
+          setMinLikes(dashboard.config.thresholds.likes || 1000)
+          setMinCollect(dashboard.config.thresholds.collect || 500)
+          setMinComment(dashboard.config.thresholds.comment || 500)
+          setMinShare(dashboard.config.thresholds.share || 500)
           setLimit(dashboard.config.countPerAccount || 2)
+          if (dashboard.config.integrations?.transcription) {
+            const settings = dashboard.config.integrations.transcription
+            setTranscriptionProvider(settings.provider || 'faster-whisper')
+            setTranscriptionLanguage(settings.language || 'zh')
+            setLocalModel(settings.localModel || 'small')
+            setLocalDevice(settings.localDevice || 'auto')
+            setLocalComputeType(settings.localComputeType || 'int8')
+            setTranscriptionPrompt(settings.prompt || '请使用标点符号：，。、；：？！')
+          }
+          if (dashboard.config.integrations?.runtime) {
+            const runtime = dashboard.config.integrations.runtime
+            setLocalApiBase(runtime.localApiBase || '')
+            setPythonBin(runtime.pythonBin || '')
+            setMonitorDir(runtime.monitorDir || '')
+          }
           setLoading(false)
         })
       })
@@ -373,6 +749,26 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    window.localStorage.setItem('douyin-monitor-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    const onHashChange = () => setActivePage(getInitialPage())
+    window.addEventListener('hashchange', onHashChange)
+    window.addEventListener('popstate', onHashChange)
+    return () => {
+      window.removeEventListener('hashchange', onHashChange)
+      window.removeEventListener('popstate', onHashChange)
+    }
+  }, [])
+
+  function navigate(page: PageId) {
+    setActivePage(page)
+    window.history.pushState(null, '', page === 'overview' ? '/' : `/${page}`)
+  }
+
   return (
     <main className="app-frame">
       <aside className="app-sidebar">
@@ -385,22 +781,20 @@ function App() {
         </div>
 
         <nav className="nav-list">
-          <NavItem active={activeTab === '精选'} icon={Zap} label="精选" onClick={() => setActiveTab('精选')} />
-          <NavItem active={activeTab === '账号'} icon={LayoutList} label="账号监控" onClick={() => setActiveTab('账号')} />
-          <NavItem active={activeTab === '低粉'} icon={Search} label="低粉爆款" onClick={() => setActiveTab('低粉')} />
-          <NavItem icon={FileText} label="账号日报" onClick={() => setActiveTab('日报')} />
-          <NavItem icon={Bot} label="Agent 接入" onClick={() => setActiveTab('Agent')} />
-          <NavItem icon={Heart} label="关于" onClick={() => setActiveTab('关于')} />
-          <NavItem icon={History} label="更新日志" onClick={() => setActiveTab('日志')} />
-          <NavItem icon={Send} label="反馈" onClick={() => setActiveTab('反馈')} />
-          <NavItem icon={Plus} label="信源提报" onClick={() => setActiveTab('提报')} />
+          {navItems.map((item) => (
+            <NavItem active={activePage === item.id} desc={item.desc} icon={item.icon} key={item.id} label={item.label} onClick={() => navigate(item.id)} />
+          ))}
         </nav>
 
         <div className="sidebar-bottom">
           <div className="theme-toggle" aria-label="主题切换">
-            <Moon className="size-4" />
+            <button className={theme === 'dark' ? 'theme-button active' : 'theme-button'} onClick={() => setTheme('dark')} title="夜间模式">
+              <Moon className="size-4" />
+            </button>
             <Command className="size-4" />
-            <Sun className="size-4" />
+            <button className={theme === 'light' ? 'theme-button active' : 'theme-button'} onClick={() => setTheme('light')} title="浅色模式">
+              <Sun className="size-4" />
+            </button>
           </div>
           <div className="login-row">
             <LogIn className="size-4" />
@@ -412,8 +806,9 @@ function App() {
       <section className="main-stream">
         <header className="stream-header">
           <div>
-            <h1>精选</h1>
-            <p>{resultMode === 'lowfan' ? '低粉爆款搜索结果' : resultMode === 'account' ? '对标账号最新作品' : '本地自动挑选的高价值抖音素材'}</p>
+            <span className="page-eyebrow">{currentPage.eyebrow}</span>
+            <h1>{currentPage.title}</h1>
+            <p>{currentPage.description}</p>
           </div>
           <div className="header-status">
             <Badge variant={data.service.ok ? 'success' : 'warning'}>
@@ -426,9 +821,9 @@ function App() {
           </div>
           <div className="header-tools">
             <div className="tabs-shell">
-              {['精选', '账号', '低粉', '封面', '口播', '归档'].map((tab) => (
-                <button className={tab === activeTab ? 'tab active' : 'tab'} key={tab} onClick={() => setActiveTab(tab)}>
-                  {tab}
+              {navItems.slice(0, 5).map((item) => (
+                <button className={item.id === activePage ? 'tab active' : 'tab'} key={item.id} onClick={() => navigate(item.id)}>
+                  {item.label}
                 </button>
               ))}
             </div>
@@ -446,8 +841,20 @@ function App() {
         <section className="ops-strip">
           <StatusPill icon={Users} label="监控账号" value={`${data.config.accountCount} 个`} />
           <StatusPill icon={Gauge} label="粉丝阈值" value={`≤ ${formatNumber(data.config.thresholds.fans_num)}`} />
-          <StatusPill icon={Sparkles} label="TikHub" value={data.config.hasTikhubKey ? '已接入' : '未配置'} tone={data.config.hasTikhubKey ? 'good' : 'warn'} />
-          <StatusPill icon={Captions} label="Lemonfox" value={data.config.hasLemonfoxKey ? '已接入' : '未配置'} tone={data.config.hasLemonfoxKey ? 'good' : 'warn'} />
+          <StatusPill
+            icon={Sparkles}
+            label="TikHub"
+            value={data.config.hasTikhubKey ? '已接入' : '未配置'}
+            tone={data.config.hasTikhubKey ? 'good' : 'warn'}
+            tooltip="用于抖音搜索和作品数据。不是长期无限免费，通常有试用额度后按请求或套餐计费，以 TikHub 官网为准。"
+          />
+          <StatusPill
+            icon={Captions}
+            label="转写"
+            value={formatProvider(activeTranscription.provider)}
+            tone={providerStatus.available ? 'good' : 'warn'}
+            tooltip="Lemonfox 是云端转写，通常消耗付费额度；faster-whisper / Whisper 是本地模型，框架免费但会消耗本机算力和模型存储。"
+          />
           <div className="run-actions">
             <Button variant="secondary" onClick={runAccount} disabled={running !== null}>
               {running === 'account' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
@@ -460,179 +867,797 @@ function App() {
           </div>
         </section>
 
-        <section className="control-grid">
-          <Card className="control-card lowfan-card">
-            <CardContent>
-              <PanelTitle icon={Search} title="低粉爆款搜索" />
-              <div className="form-grid">
-                <Field label="关键词">
-                  <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="AI智能体 / 口播 / 副业" />
-                </Field>
-                <Field label="发布时间">
-                  <Select value={publishTime} onChange={setPublishTime} options={publishOptions} />
-                </Field>
-                <Field label="视频时长">
-                  <Select value={duration} onChange={setDuration} options={durationOptions} />
-                </Field>
-                <Field label="排序方式">
-                  <Select value={sort} onChange={setSort} options={sortOptions} />
-                </Field>
-                <Field label="搜索线路">
-                  <Select
-                    value={route}
-                    onChange={setRoute}
-                    options={[
-                      { label: '线路一 Web', value: '1' },
-                      { label: '线路二 Search', value: '2' },
-                    ]}
-                  />
-                </Field>
-                <Field label="页数">
-                  <NumberInput value={pages} min={1} max={5} onChange={setPages} />
-                </Field>
-                <Field label="每页数量">
-                  <NumberInput value={count} min={5} max={50} step={5} onChange={setCount} />
-                </Field>
-              </div>
-              <div className="threshold-row">
-                <span>粉丝 ≤ {formatNumber(data.config.thresholds.fans_num)}</span>
-                <span>赞 ≥ {formatNumber(data.config.thresholds.likes)}</span>
-                <span>藏 ≥ {formatNumber(data.config.thresholds.collect)}</span>
-                <span>评 ≥ {formatNumber(data.config.thresholds.comment)}</span>
-                <span>转 ≥ {formatNumber(data.config.thresholds.share)}</span>
-              </div>
-              <Button className="full-action" onClick={runLowfan} disabled={running !== null || !keyword.trim()}>
-                {running === 'lowfan' ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                开始搜索低粉爆款
-              </Button>
-            </CardContent>
-          </Card>
+        {activePage === 'overview' && (
+          <>
+            <section className="summary-grid">
+              <FeatureTile icon={Search} title="低粉爆款" value={resultMode === 'lowfan' ? `${displayRows.length} 条命中` : '关键词发现'} onClick={() => navigate('lowfan')} />
+              <FeatureTile icon={LayoutList} title="对标账号" value={`${data.config.accountCount} 个账号`} onClick={() => navigate('accounts')} />
+              <FeatureTile icon={Settings2} title="接口配置" value={data.config.hasTikhubKey && data.config.hasLemonfoxKey ? '关键接口已接入' : '有接口待配置'} onClick={() => navigate('settings')} />
+            </section>
+            <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} />
+            <UtilityGrid lastErrors={lastErrors} lastRun={lastRun} parsedRun={parsedRun} reports={data.reports} />
+          </>
+        )}
 
-          <Card className="control-card account-card">
-            <CardContent>
-              <PanelTitle icon={ShieldCheck} title="对标账号监控" />
-              <div className="form-grid account-form">
-                <Field label="账号范围">
-                  <Select
-                    value={maxAccounts}
-                    onChange={(value) => setMaxAccounts(value as '3' | 'all')}
-                    options={[
-                      { label: '前 3 个', value: '3' },
-                      { label: '全部账号', value: 'all' },
-                    ]}
-                  />
-                </Field>
-                <Field label="每账号条数">
-                  <NumberInput value={limit} min={1} max={10} onChange={setLimit} />
-                </Field>
-                <Field label="请求超时">
-                  <NumberInput value={timeout} min={8} max={60} onChange={setTimeoutValue} />
-                </Field>
-              </div>
-              <div className="switch-panel compact">
-                <Switch label="包含已看过作品" checked={includeSeen} onCheckedChange={setIncludeSeen} />
-                <Switch label="下载无水印视频" checked={downloadVideo} onCheckedChange={setDownloadVideo} />
-                <Switch label="提取口播文稿" checked={transcribe} onCheckedChange={setTranscribe} />
-              </div>
-              <div className="account-list">
-                {visibleAccounts.map((account) => (
-                  <span className="account-chip" key={account.secUserId}>
-                    <b>{String(account.index).padStart(2, '0')}</b>
-                    {account.name}
-                  </span>
-                ))}
-              </div>
-              <Button className="full-action" variant="secondary" onClick={runAccount} disabled={running !== null}>
-                {running === 'account' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-                开始监控对标账号
-              </Button>
-            </CardContent>
-          </Card>
+        {activePage === 'lowfan' && (
+          <section className="workspace-grid">
+            <LowfanPanel
+              count={count}
+              duration={duration}
+              keyword={keyword}
+              pages={pages}
+              publishTime={publishTime}
+              route={route}
+              running={running}
+              setCount={setCount}
+              setDuration={setDuration}
+              setKeyword={setKeyword}
+              setPages={setPages}
+              setPublishTime={setPublishTime}
+              setRoute={setRoute}
+              setSort={setSort}
+              sort={sort}
+              thresholds={data.config.thresholds}
+              onRun={runLowfan}
+            />
+            <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} mode="compact" />
+          </section>
+        )}
 
-          <Card className="control-card session-card">
-            <CardContent>
-              <PanelTitle icon={KeyRound} title="抖音登录态" />
-              <div className="session-box">
-                <Input value={sessionid} onChange={(event) => setSessionid(event.target.value)} placeholder="sessionid" type="password" />
-                <Button variant="ghost" onClick={saveSession} disabled={running !== null || !sessionid.trim()}>
-                  {running === 'session' ? <Loader2 className="size-4 animate-spin" /> : <Settings2 className="size-4" />}
-                  保存
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        {activePage === 'accounts' && (
+          <section className="workspace-grid">
+            <AccountPanel
+              downloadVideo={downloadVideo}
+              includeSeen={includeSeen}
+              limit={limit}
+              maxAccounts={maxAccounts}
+              running={running}
+              setDownloadVideo={setDownloadVideo}
+              setIncludeSeen={setIncludeSeen}
+              setLimit={setLimit}
+              setMaxAccounts={setMaxAccounts}
+              setTimeoutValue={setTimeoutValue}
+              setTranscribe={setTranscribe}
+              timeout={timeout}
+              transcribe={transcribe}
+              visibleAccounts={visibleAccounts}
+              onRun={runAccount}
+            />
+            <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} mode="compact" />
+          </section>
+        )}
 
-        <section className="timeline">
-          <div className="date-label">{formatMonthDay(latestReport?.modifiedAt)}</div>
-          {feedItems.map((item, index) => (
-            <TimelineItem item={item} index={index} key={`${item.video_id}-${index}`} empty={!displayRows.length} />
-          ))}
-        </section>
+        {activePage === 'settings' && (
+          <section className="settings-layout">
+            <ThresholdPanel
+              count={count}
+              fansNum={fansNum}
+              minCollect={minCollect}
+              minComment={minComment}
+              minLikes={minLikes}
+              minShare={minShare}
+              pages={pages}
+              route={route}
+              running={running}
+              saveThresholds={saveThresholds}
+              setCount={setCount}
+              setFansNum={setFansNum}
+              setMinCollect={setMinCollect}
+              setMinComment={setMinComment}
+              setMinLikes={setMinLikes}
+              setMinShare={setMinShare}
+              setPages={setPages}
+              setRoute={setRoute}
+            />
+            <IntegrationPanel
+              activeTranscription={activeTranscription}
+              integrations={integrations}
+              lemonfoxKey={lemonfoxKey}
+              localComputeType={localComputeType}
+              localDevice={localDevice}
+              localModel={localModel}
+              running={running}
+              saveIntegrations={saveIntegrations}
+              setLemonfoxKey={setLemonfoxKey}
+              setLocalComputeType={setLocalComputeType}
+              setLocalDevice={setLocalDevice}
+              setLocalModel={setLocalModel}
+              setTikhubKey={setTikhubKey}
+              setTranscriptionLanguage={setTranscriptionLanguage}
+              setTranscriptionPrompt={setTranscriptionPrompt}
+              setTranscriptionProvider={setTranscriptionProvider}
+              tikhubKey={tikhubKey}
+              transcriptionLanguage={transcriptionLanguage}
+              transcriptionPrompt={transcriptionPrompt}
+              transcriptionProvider={transcriptionProvider}
+            />
+            <RuntimePanel
+              localApiBase={localApiBase || runtimeSettings?.localApiBase || ''}
+              monitorDir={monitorDir || runtimeSettings?.monitorDir || ''}
+              pythonBin={pythonBin || runtimeSettings?.pythonBin || ''}
+              running={running}
+              saveRuntime={saveRuntime}
+              setLocalApiBase={setLocalApiBase}
+              setMonitorDir={setMonitorDir}
+              setPythonBin={setPythonBin}
+            />
+            <SessionPanel parserConfig={integrations.parserConfig} running={running} saveSession={saveSession} sessionid={sessionid} setSessionid={setSessionid} />
+          </section>
+        )}
 
-        <section className="bottom-grid">
-          <Card className="terminal-card">
-            <CardContent>
-              <div className="section-title">
-                <Clock3 className="size-4" />
-                最近运行
-              </div>
-              <pre>{parsedRun ? JSON.stringify(parsedRun, null, 2) : lastRun?.stderr || lastRun?.stdout || '等待下一次运行。'}</pre>
-            </CardContent>
-          </Card>
-
-          <Card className="reports-card">
-            <CardContent>
-              <div className="section-title">
-                <Archive className="size-4" />
-                归档报告
-              </div>
-              <div className="report-list">
-                {data.reports.slice(0, 6).map((report) => (
-                  <div className="report-item" key={report.path}>
-                    <span>{report.name}</span>
-                    <Badge>{report.type.toUpperCase()}</Badge>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="alerts-card">
-            <CardContent>
-              <div className="section-title">
-                <AlertTriangle className="size-4" />
-                监控提示
-              </div>
-              <div className="alert-list">
-                {lastErrors.length ? (
-                  lastErrors.slice(0, 3).map((error, index) => (
-                    <div className="alert-line" key={index}>
-                      <span>{String((error as Record<string, unknown>).account || '账号')}</span>
-                      <p>{String((error as Record<string, unknown>).error || '未知错误')}</p>
-                    </div>
-                  ))
-                ) : (
-                  <div className="alert-line good">
-                    <span>系统</span>
-                    <p>暂无最近错误。</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </section>
+        {activePage === 'reports' && <ReportsPage reports={data.reports} />}
+        {activePage === 'ops' && <OpsPage data={data} lastErrors={lastErrors} lastRun={lastRun} parsedRun={parsedRun} providerStatus={providerStatus} />}
+        {activePage === 'about' && <AboutPage />}
       </section>
     </main>
   )
 }
 
-function NavItem({ active, icon: Icon, label, onClick }: { active?: boolean; icon: IconComponent; label: string; onClick: () => void }) {
+function NavItem({ active, desc, icon: Icon, label, onClick }: { active?: boolean; desc: string; icon: IconComponent; label: string; onClick: () => void }) {
   return (
     <button className={active ? 'nav-item active' : 'nav-item'} onClick={onClick}>
       <Icon className="size-5" />
-      <span>{label}</span>
+      <span>
+        {label}
+        <small>{desc}</small>
+      </span>
     </button>
+  )
+}
+
+function FeatureTile({ icon: Icon, title, value, onClick }: { icon: IconComponent; title: string; value: string; onClick: () => void }) {
+  return (
+    <button className="feature-tile" onClick={onClick}>
+      <Icon className="size-5" />
+      <span>{title}</span>
+      <strong>{value}</strong>
+    </button>
+  )
+}
+
+function LowfanPanel({
+  count,
+  duration,
+  keyword,
+  pages,
+  publishTime,
+  route,
+  running,
+  setCount,
+  setDuration,
+  setKeyword,
+  setPages,
+  setPublishTime,
+  setRoute,
+  setSort,
+  sort,
+  thresholds,
+  onRun,
+}: {
+  count: number
+  duration: string
+  keyword: string
+  pages: number
+  publishTime: string
+  route: string
+  running: RunningAction
+  setCount: (value: number) => void
+  setDuration: (value: string) => void
+  setKeyword: (value: string) => void
+  setPages: (value: number) => void
+  setPublishTime: (value: string) => void
+  setRoute: (value: string) => void
+  setSort: (value: string) => void
+  sort: string
+  thresholds: ConfigSummary['thresholds']
+  onRun: () => void
+}) {
+  return (
+    <Card className="control-card lowfan-card page-card">
+      <CardContent>
+        <PanelTitle icon={Search} title="搜索条件" />
+        <p className="panel-copy">用于主动发现“账号粉丝不高，但单条内容互动明显跑出来”的素材。</p>
+        <div className="form-grid">
+          <Field label="关键词">
+            <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="AI智能体 / 口播 / 副业" />
+          </Field>
+          <Field label="发布时间">
+            <Select value={publishTime} onChange={setPublishTime} options={publishOptions} />
+          </Field>
+          <Field label="视频时长">
+            <Select value={duration} onChange={setDuration} options={durationOptions} />
+          </Field>
+          <Field label="排序方式">
+            <Select value={sort} onChange={setSort} options={sortOptions} />
+          </Field>
+          <Field label="搜索线路">
+            <Select
+              value={route}
+              onChange={setRoute}
+              options={[
+                { label: '线路一 Web', value: '1' },
+                { label: '线路二 Search', value: '2' },
+              ]}
+            />
+          </Field>
+          <Field label="页数">
+            <NumberInput value={pages} min={1} max={5} onChange={setPages} />
+          </Field>
+          <Field label="每页数量">
+            <NumberInput value={count} min={5} max={50} step={5} onChange={setCount} />
+          </Field>
+        </div>
+        <div className="threshold-row">
+          <span>粉丝 ≤ {formatNumber(thresholds.fans_num)}</span>
+          <span>赞 ≥ {formatNumber(thresholds.likes)}</span>
+          <span>藏 ≥ {formatNumber(thresholds.collect)}</span>
+          <span>评 ≥ {formatNumber(thresholds.comment)}</span>
+          <span>转 ≥ {formatNumber(thresholds.share)}</span>
+        </div>
+        <Button className="full-action" onClick={onRun} disabled={running !== null || !keyword.trim()}>
+          {running === 'lowfan' ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+          开始搜索低粉爆款
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function AccountPanel({
+  downloadVideo,
+  includeSeen,
+  limit,
+  maxAccounts,
+  running,
+  setDownloadVideo,
+  setIncludeSeen,
+  setLimit,
+  setMaxAccounts,
+  setTimeoutValue,
+  setTranscribe,
+  timeout,
+  transcribe,
+  visibleAccounts,
+  onRun,
+}: {
+  downloadVideo: boolean
+  includeSeen: boolean
+  limit: number
+  maxAccounts: '3' | 'all'
+  running: RunningAction
+  setDownloadVideo: (value: boolean) => void
+  setIncludeSeen: (value: boolean) => void
+  setLimit: (value: number) => void
+  setMaxAccounts: (value: '3' | 'all') => void
+  setTimeoutValue: (value: number) => void
+  setTranscribe: (value: boolean) => void
+  timeout: number
+  transcribe: boolean
+  visibleAccounts: AccountSummary[]
+  onRun: () => void
+}) {
+  return (
+    <Card className="control-card account-card page-card">
+      <CardContent>
+        <PanelTitle icon={ShieldCheck} title="监控批次" />
+        <p className="panel-copy">用于固定跟踪配置里的对标账号池，适合团队每天看最新作品和异常互动。</p>
+        <div className="form-grid account-form">
+          <Field label="账号范围">
+            <Select
+              value={maxAccounts}
+              onChange={(value) => setMaxAccounts(value as '3' | 'all')}
+              options={[
+                { label: '前 3 个', value: '3' },
+                { label: '全部账号', value: 'all' },
+              ]}
+            />
+          </Field>
+          <Field label="每账号条数">
+            <NumberInput value={limit} min={1} max={10} onChange={setLimit} />
+          </Field>
+          <Field label="请求超时">
+            <NumberInput value={timeout} min={8} max={60} onChange={setTimeoutValue} />
+          </Field>
+        </div>
+        <div className="switch-panel compact">
+          <Switch label="包含已看过作品" checked={includeSeen} onCheckedChange={setIncludeSeen} />
+          <Switch label="下载无水印视频" checked={downloadVideo} onCheckedChange={setDownloadVideo} />
+          <Switch label="提取口播文稿" checked={transcribe} onCheckedChange={setTranscribe} />
+        </div>
+        <div className="account-list">
+          {visibleAccounts.length ? (
+            visibleAccounts.map((account) => (
+              <span className="account-chip" key={account.secUserId}>
+                <b>{String(account.index).padStart(2, '0')}</b>
+                {account.name}
+              </span>
+            ))
+          ) : (
+            <span className="account-chip muted">请先在 config.json 添加对标账号</span>
+          )}
+        </div>
+        <Button className="full-action" variant="secondary" onClick={onRun} disabled={running !== null}>
+          {running === 'account' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+          开始监控对标账号
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function SessionPanel({
+  parserConfig,
+  running,
+  saveSession,
+  sessionid,
+  setSessionid,
+}: {
+  parserConfig?: ParserConfigStatus
+  running: RunningAction
+  saveSession: () => void
+  sessionid: string
+  setSessionid: (value: string) => void
+}) {
+  const writable = Boolean(parserConfig?.writable)
+
+  return (
+    <Card className="control-card session-card">
+      <CardContent>
+        <PanelTitle icon={KeyRound} title="抖音登录态" />
+        <p className="panel-copy">用于本地解析服务访问需要登录态的抖音页面。只有配置了可写的 `DOUYIN_WEB_CONFIG` 时，这里才会写入解析服务配置。</p>
+        <div className={writable ? 'session-status ready' : 'session-status'}>
+          <strong>{writable ? '可写入 parser config' : '未连接可写 parser config'}</strong>
+          <span>{parserConfig?.path || 'DOUYIN_WEB_CONFIG 未配置'}</span>
+          <p>{parserConfig?.detail || 'Docker 默认内置解析容器不会把 Cookie 配置暴露给 UI 写入。'}</p>
+        </div>
+        <div className="session-box">
+          <Input value={sessionid} onChange={(event) => setSessionid(event.target.value)} placeholder="sessionid" type="password" />
+          <Button variant="ghost" onClick={saveSession} disabled={running !== null || !sessionid.trim() || !writable}>
+            {running === 'session' ? <Loader2 className="size-4 animate-spin" /> : <Settings2 className="size-4" />}
+            保存
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ThresholdPanel({
+  count,
+  fansNum,
+  minCollect,
+  minComment,
+  minLikes,
+  minShare,
+  pages,
+  route,
+  running,
+  saveThresholds,
+  setCount,
+  setFansNum,
+  setMinCollect,
+  setMinComment,
+  setMinLikes,
+  setMinShare,
+  setPages,
+  setRoute,
+}: {
+  count: number
+  fansNum: number
+  minCollect: number
+  minComment: number
+  minLikes: number
+  minShare: number
+  pages: number
+  route: string
+  running: RunningAction
+  saveThresholds: () => void
+  setCount: (value: number) => void
+  setFansNum: (value: number) => void
+  setMinCollect: (value: number) => void
+  setMinComment: (value: number) => void
+  setMinLikes: (value: number) => void
+  setMinShare: (value: number) => void
+  setPages: (value: number) => void
+  setRoute: (value: string) => void
+}) {
+  return (
+    <Card className="control-card thresholds-card">
+      <CardContent>
+        <PanelTitle icon={Gauge} title="监控阈值" />
+        <p className="panel-copy">没有手动设置时使用默认值；保存后会写入 config.json，低粉爆款搜索下次自动沿用。</p>
+        <div className="threshold-editor">
+          <Field label="粉丝上限" help="作者粉丝数低于这个值，才会进入低粉爆款候选。">
+            <NumberInput value={fansNum} min={100} max={10000000} step={1000} onChange={setFansNum} />
+          </Field>
+          <Field label="最低点赞">
+            <NumberInput value={minLikes} min={1} max={10000000} step={100} onChange={setMinLikes} />
+          </Field>
+          <Field label="最低收藏">
+            <NumberInput value={minCollect} min={1} max={10000000} step={50} onChange={setMinCollect} />
+          </Field>
+          <Field label="最低评论">
+            <NumberInput value={minComment} min={1} max={10000000} step={50} onChange={setMinComment} />
+          </Field>
+          <Field label="最低转发">
+            <NumberInput value={minShare} min={1} max={10000000} step={50} onChange={setMinShare} />
+          </Field>
+          <Field label="默认页数">
+            <NumberInput value={pages} min={1} max={10} onChange={setPages} />
+          </Field>
+          <Field label="默认每页数量">
+            <NumberInput value={count} min={5} max={50} step={5} onChange={setCount} />
+          </Field>
+          <Field label="默认线路">
+            <Select
+              value={route}
+              onChange={setRoute}
+              options={[
+                { label: '线路二 Search', value: '2' },
+                { label: '线路一 Web', value: '1' },
+              ]}
+            />
+          </Field>
+        </div>
+        <Button className="full-action" variant="secondary" onClick={saveThresholds} disabled={running !== null}>
+          {running === 'thresholds' ? <Loader2 className="size-4 animate-spin" /> : <Gauge className="size-4" />}
+          保存监控阈值
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function IntegrationPanel({
+  activeTranscription,
+  integrations,
+  lemonfoxKey,
+  localComputeType,
+  localDevice,
+  localModel,
+  running,
+  saveIntegrations,
+  setLemonfoxKey,
+  setLocalComputeType,
+  setLocalDevice,
+  setLocalModel,
+  setTikhubKey,
+  setTranscriptionLanguage,
+  setTranscriptionPrompt,
+  setTranscriptionProvider,
+  tikhubKey,
+  transcriptionLanguage,
+  transcriptionPrompt,
+  transcriptionProvider,
+}: {
+  activeTranscription: TranscriptionSettings
+  integrations: NonNullable<ConfigSummary['integrations']>
+  lemonfoxKey: string
+  localComputeType: string
+  localDevice: string
+  localModel: string
+  running: RunningAction
+  saveIntegrations: () => void
+  setLemonfoxKey: (value: string) => void
+  setLocalComputeType: (value: string) => void
+  setLocalDevice: (value: string) => void
+  setLocalModel: (value: string) => void
+  setTikhubKey: (value: string) => void
+  setTranscriptionLanguage: (value: string) => void
+  setTranscriptionPrompt: (value: string) => void
+  setTranscriptionProvider: (value: string) => void
+  tikhubKey: string
+  transcriptionLanguage: string
+  transcriptionPrompt: string
+  transcriptionProvider: string
+}) {
+  return (
+    <Card className="control-card settings-card">
+      <CardContent>
+        <PanelTitle icon={Settings2} title="接口与转写" />
+        <p className="panel-copy">低粉搜索需要 TikHub；转写默认走本地 faster-whisper，Lemonfox 仅作为云端省心选项。</p>
+        <div className="form-grid">
+          <Field label="TikHub Key" help="用于低粉爆款搜索。官网有试用额度，正式使用通常按请求或套餐收费。">
+            <Input value={tikhubKey} onChange={(event) => setTikhubKey(event.target.value)} placeholder={integrations.tikhub.configured ? integrations.tikhub.masked : 'Bearer ...'} type="password" />
+          </Field>
+          <Field label="Lemonfox Key" help="用于云端语音转文字。官网展示试用和按月/积分计费，批量转写前要看额度。">
+            <Input value={lemonfoxKey} onChange={(event) => setLemonfoxKey(event.target.value)} placeholder={integrations.lemonfox.configured ? integrations.lemonfox.masked : 'sk-...'} type="password" />
+          </Field>
+          <Field label="转写引擎">
+            <Select value={transcriptionProvider} onChange={setTranscriptionProvider} options={providerOptions} />
+          </Field>
+          <Field label="语言">
+            <Input value={transcriptionLanguage} onChange={(event) => setTranscriptionLanguage(event.target.value)} placeholder="zh / auto / en" />
+          </Field>
+        </div>
+        <details className="advanced-settings">
+          <summary>本地转写高级设置</summary>
+          <p>默认 `small / auto / int8` 对多数 Mac 和轻量服务器够用。需要更快可以用 `tiny/base`，需要更准再改 `medium/large-v3`，但会明显增加模型下载、内存和耗时。</p>
+          <div className="form-grid">
+            <Field label="本地模型">
+              <Input value={localModel} onChange={(event) => setLocalModel(event.target.value)} placeholder="tiny / base / small / medium" />
+            </Field>
+            <Field label="计算方式">
+              <Input value={localComputeType} onChange={(event) => setLocalComputeType(event.target.value)} placeholder="int8 / float16" />
+            </Field>
+          </div>
+          <Field label="设备">
+            <Input value={localDevice} onChange={(event) => setLocalDevice(event.target.value)} placeholder="auto / cpu / cuda" />
+          </Field>
+          <Field label="转写提示词">
+            <textarea className="textarea-control" value={transcriptionPrompt} onChange={(event) => setTranscriptionPrompt(event.target.value)} rows={3} />
+          </Field>
+        </details>
+        <div className="transcription-guide">
+          <strong>本地转写怎么选</strong>
+          <p>优先用 faster-whisper：速度和资源占用更适合批量账号监控。openai-whisper 更适合已有 Whisper 环境的用户。两者都需要先勾选“下载无水印视频”，本地模型才能读取视频文件。</p>
+          <code>python3 -m pip install faster-whisper</code>
+          <code>python3 -m pip install openai-whisper</code>
+        </div>
+        <div className="provider-grid">
+          <ProviderPill label="faster-whisper" status={activeTranscription.providers?.fasterWhisper} />
+          <ProviderPill label="Whisper" status={activeTranscription.providers?.whisper} />
+          <ProviderPill label="Lemonfox" status={activeTranscription.providers?.lemonfox} />
+        </div>
+        <Button className="full-action" variant="secondary" onClick={saveIntegrations} disabled={running !== null}>
+          {running === 'integrations' ? <Loader2 className="size-4 animate-spin" /> : <Settings2 className="size-4" />}
+          保存接口与转写配置
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function RuntimePanel({
+  localApiBase,
+  monitorDir,
+  pythonBin,
+  running,
+  saveRuntime,
+  setLocalApiBase,
+  setMonitorDir,
+  setPythonBin,
+}: {
+  localApiBase: string
+  monitorDir: string
+  pythonBin: string
+  running: RunningAction
+  saveRuntime: () => void
+  setLocalApiBase: (value: string) => void
+  setMonitorDir: (value: string) => void
+  setPythonBin: (value: string) => void
+}) {
+  return (
+    <Card className="control-card runtime-card">
+      <CardContent>
+        <PanelTitle icon={Server} title="后台解析服务" />
+        <p className="panel-copy">Docker Compose 会随本项目启动内置解析服务。这里通常只需要确认 API 地址；完整上游项目只作为 Cookie、代理和高级部署管理入口。</p>
+        <div className="form-grid">
+          <Field label="解析 API" help="通常是 FastAPI 或兼容服务。FastAPI 框架免费开源，但服务器、代理和维护不免费。">
+            <Input value={localApiBase} onChange={(event) => setLocalApiBase(event.target.value)} placeholder="http://127.0.0.1:8091" />
+          </Field>
+        </div>
+        <details className="advanced-settings">
+          <summary>开发者路径设置</summary>
+          <div className="form-grid">
+            <Field label="Python 命令">
+              <Input value={pythonBin} onChange={(event) => setPythonBin(event.target.value)} placeholder="python3" />
+            </Field>
+            <Field label="Monitor 目录">
+              <Input value={monitorDir} onChange={(event) => setMonitorDir(event.target.value)} placeholder="../douyin-monitor" />
+            </Field>
+          </div>
+        </details>
+        <Button className="full-action" variant="ghost" onClick={saveRuntime} disabled={running !== null}>
+          {running === 'runtime' ? <Loader2 className="size-4 animate-spin" /> : <Server className="size-4" />}
+          保存后台配置
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function LearningGrid() {
+  return (
+    <section className="learning-grid">
+      {learningCards.map((card) => (
+        <Card className="learning-card" key={card.title}>
+          <CardContent>
+            <strong>
+              {card.title}
+              <InfoTooltip text={card.cost} />
+            </strong>
+            <p>{card.body}</p>
+            <span>{card.alternatives}</span>
+          </CardContent>
+        </Card>
+      ))}
+    </section>
+  )
+}
+
+function TimelineSection({
+  displayRows,
+  feedItems,
+  latestReport,
+  mode,
+}: {
+  displayRows: ReportRow[]
+  feedItems: ReportRow[]
+  latestReport?: ReportFile
+  mode?: 'compact'
+}) {
+  return (
+    <section className={mode === 'compact' ? 'timeline compact' : 'timeline'}>
+      <div className="date-label">{formatMonthDay(latestReport?.modifiedAt)}</div>
+      {feedItems.map((item, index) => (
+        <TimelineItem item={item} index={index} key={`${item.video_id}-${index}`} empty={!displayRows.length} />
+      ))}
+    </section>
+  )
+}
+
+function UtilityGrid({
+  lastErrors,
+  lastRun,
+  parsedRun,
+  reports,
+}: {
+  lastErrors: unknown[]
+  lastRun?: RunResult
+  parsedRun: Record<string, unknown> | null
+  reports: ReportFile[]
+}) {
+  return (
+    <section className="bottom-grid">
+      <RunLogCard lastRun={lastRun} parsedRun={parsedRun} />
+      <ReportsCard reports={reports.slice(0, 6)} />
+      <AlertsCard lastErrors={lastErrors} />
+    </section>
+  )
+}
+
+function RunLogCard({ lastRun, parsedRun }: { lastRun?: RunResult; parsedRun: Record<string, unknown> | null }) {
+  return (
+    <Card className="terminal-card">
+      <CardContent>
+        <div className="section-title">
+          <Clock3 className="size-4" />
+          最近运行
+        </div>
+        <pre>{parsedRun ? JSON.stringify(parsedRun, null, 2) : lastRun?.stderr || lastRun?.stdout || '等待下一次运行。'}</pre>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ReportsCard({ reports }: { reports: ReportFile[] }) {
+  return (
+    <Card className="reports-card">
+      <CardContent>
+        <div className="section-title">
+          <Archive className="size-4" />
+          归档报告
+        </div>
+        <div className="report-list">
+          {reports.length ? (
+            reports.map((report) => (
+              <div className="report-item" key={report.path}>
+                <span>{report.name}</span>
+                <Badge>{report.type.toUpperCase()}</Badge>
+              </div>
+            ))
+          ) : (
+            <div className="report-item empty">暂无报告</div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function AlertsCard({ lastErrors }: { lastErrors: unknown[] }) {
+  return (
+    <Card className="alerts-card">
+      <CardContent>
+        <div className="section-title">
+          <AlertTriangle className="size-4" />
+          监控提示
+        </div>
+        <div className="alert-list">
+          {lastErrors.length ? (
+            lastErrors.slice(0, 3).map((error, index) => (
+              <div className="alert-line" key={index}>
+                <span>{String((error as Record<string, unknown>).account || '账号')}</span>
+                <p>{String((error as Record<string, unknown>).error || '未知错误')}</p>
+              </div>
+            ))
+          ) : (
+            <div className="alert-line good">
+              <span>系统</span>
+              <p>暂无最近错误。</p>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ReportsPage({ reports }: { reports: ReportFile[] }) {
+  return (
+    <section className="reports-page">
+      {reports.length ? (
+        reports.map((report) => (
+          <Card className="report-row-card" key={report.path}>
+            <CardContent>
+              <div>
+                <Badge>{report.type.toUpperCase()}</Badge>
+                <strong>{report.name}</strong>
+                <p>{report.path}</p>
+              </div>
+              <span>{formatBytes(report.size)}</span>
+              <time>{formatMonthDay(report.modifiedAt)} {formatClock(report.modifiedAt)}</time>
+            </CardContent>
+          </Card>
+        ))
+      ) : (
+        <Card className="report-row-card">
+          <CardContent>
+            <div>
+              <strong>暂无归档报告</strong>
+              <p>运行低粉爆款搜索或对标账号监控后，会在这里显示生成的文件。</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </section>
+  )
+}
+
+function OpsPage({
+  data,
+  lastErrors,
+  lastRun,
+  parsedRun,
+  providerStatus,
+}: {
+  data: DashboardData
+  lastErrors: unknown[]
+  lastRun?: RunResult
+  parsedRun: Record<string, unknown> | null
+  providerStatus: ProviderStatus
+}) {
+  return (
+    <section className="ops-page">
+      <div className="ops-diagnostics">
+        <StatusPill icon={CheckCircle2} label="解析服务" value={data.service.ok ? '在线' : '异常'} tone={data.service.ok ? 'good' : 'warn'} />
+        <StatusPill icon={Sparkles} label="TikHub" value={data.config.hasTikhubKey ? '已配置' : '未配置'} tone={data.config.hasTikhubKey ? 'good' : 'warn'} />
+        <StatusPill icon={Captions} label="当前转写" value={providerStatus.available ? '可用' : '不可用'} tone={providerStatus.available ? 'good' : 'warn'} />
+        <StatusPill icon={Archive} label="报告数" value={`${data.reports.length} 份`} />
+      </div>
+      <UtilityGrid lastErrors={lastErrors} lastRun={lastRun} parsedRun={parsedRun} reports={data.reports} />
+    </section>
+  )
+}
+
+function AboutPage() {
+  return (
+    <section className="about-page">
+      <Card className="about-card">
+        <CardContent>
+          <PanelTitle icon={ChartNoAxesColumnIncreasing} title="两个目录为什么要分开" />
+          <p>低粉爆款搜索是“按关键词找机会”，对标账号监控是“按账号池看变化”。前者更像选题发现，后者更像日常巡检，放在不同目录里能减少运营同事误操作。</p>
+        </CardContent>
+      </Card>
+      <LearningGrid />
+      <Card className="about-card">
+        <CardContent>
+          <PanelTitle icon={History} title="参考 AIHOT 的部分" />
+          <p>这里借鉴了 AIHOT 的左侧目录、顶部快速切换和信息流密度，但没有硬套新闻站结构。当前产品的核心是内部运营工作台，所以优先让配置、运行、归档、诊断都能直接落到页面。</p>
+        </CardContent>
+      </Card>
+    </section>
   )
 }
 
@@ -645,12 +1670,24 @@ function PanelTitle({ icon: Icon, title }: { icon: IconComponent; title: string 
   )
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({ label, children, help }: { label: string; children: ReactNode; help?: string }) {
   return (
     <label className="field">
-      <span>{label}</span>
+      <span>
+        {label}
+        {help && <InfoTooltip text={help} />}
+      </span>
       {children}
     </label>
+  )
+}
+
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="info-tooltip" tabIndex={0} aria-label={text}>
+      <Info className="size-3.5" />
+      <i>{text}</i>
+    </span>
   )
 }
 
@@ -709,17 +1746,47 @@ function StatusPill({
   label,
   value,
   tone = 'default',
+  tooltip,
 }: {
   icon: IconComponent
   label: string
   value: string
   tone?: 'default' | 'good' | 'warn'
+  tooltip?: string
 }) {
   return (
     <div className={`status-pill ${tone}`}>
       <Icon className="size-4" />
       <span>{label}</span>
       <strong>{value}</strong>
+      {tooltip && <InfoTooltip text={tooltip} />}
+    </div>
+  )
+}
+
+function formatProvider(provider?: string) {
+  if (provider === 'faster-whisper') return '本地 faster-whisper'
+  if (provider === 'whisper') return '本地 Whisper'
+  return 'Lemonfox'
+}
+
+function getProviderStatus(settings: TranscriptionSettings): ProviderStatus {
+  if (settings.provider === 'faster-whisper') {
+    return settings.providers?.fasterWhisper || { available: false, detail: '当前 Python 环境缺少 faster-whisper' }
+  }
+  if (settings.provider === 'whisper') {
+    return settings.providers?.whisper || { available: false, detail: '当前 Python 环境缺少 openai-whisper' }
+  }
+  return settings.providers?.lemonfox || { available: false, detail: '需要配置 LEMONFOX_API_KEY' }
+}
+
+function ProviderPill({ label, status }: { label: string; status?: ProviderStatus }) {
+  const available = Boolean(status?.available)
+  return (
+    <div className={available ? 'provider-pill available' : 'provider-pill'}>
+      <span>{label}</span>
+      <strong>{available ? '可用' : '不可用'}</strong>
+      <p>{status?.detail || '等待检测'}</p>
     </div>
   )
 }

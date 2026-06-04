@@ -13,6 +13,14 @@
       }
     ]
   },
+  "transcription": {
+    "provider": "faster-whisper",
+    "language": "zh",
+    "prompt": "请使用标点符号：，。、；：？！",
+    "local_model": "small",
+    "local_device": "auto",
+    "local_compute_type": "int8"
+  },
   "low_fan_hits": {
     "fans_num": 10000,
     "likes": 1000,

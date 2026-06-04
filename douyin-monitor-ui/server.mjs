@@ -8,13 +8,25 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const defaultMonitorDir = path.resolve(__dirname, '../douyin-monitor')
-const monitorDir = process.env.MONITOR_DIR || defaultMonitorDir
-const monitorScript = path.join(monitorDir, 'douyin_monitor.py')
-const python = process.env.PYTHON_BIN || '/opt/homebrew/bin/python3.12'
-const configPath = path.join(monitorDir, 'config.json')
-const douyinWebConfigPath = process.env.DOUYIN_WEB_CONFIG || ''
+let monitorDir = defaultMonitorDir
+let monitorScript = path.join(monitorDir, 'douyin_monitor.py')
+let python = '/opt/homebrew/bin/python3.12'
+let configPath = path.join(monitorDir, 'config.json')
+let douyinWebConfigPath = ''
 const app = express()
 const port = 8787
+const host = process.env.HOST || '127.0.0.1'
+
+const defaultLowFanConfig = {
+  fans_num: 10000,
+  likes: 1000,
+  collect: 500,
+  comment: 500,
+  share: 500,
+  count: 20,
+  max_pages: 2,
+  route: 2,
+}
 
 app.use(cors())
 app.use(express.json())
@@ -30,7 +42,7 @@ async function loadLocalEnv() {
       if (index < 0) continue
       const key = trimmed.slice(0, index).trim()
       const value = trimmed.slice(index + 1).trim()
-      if (key && process.env[key] === undefined) {
+      if (key && !process.env[key]) {
         process.env[key] = value
       }
     }
@@ -39,12 +51,27 @@ async function loadLocalEnv() {
   }
 }
 
+function refreshRuntimeConfig() {
+  monitorDir = process.env.MONITOR_DIR || defaultMonitorDir
+  monitorScript = path.join(monitorDir, 'douyin_monitor.py')
+  python = process.env.PYTHON_BIN || '/opt/homebrew/bin/python3.12'
+  configPath = path.join(monitorDir, 'config.json')
+  douyinWebConfigPath = process.env.DOUYIN_WEB_CONFIG || ''
+}
+
 async function readJson(file, fallback) {
   try {
     return JSON.parse(await fs.readFile(file, 'utf8'))
   } catch {
     return fallback
   }
+}
+
+async function saveJson(file, data) {
+  const tmp = `${file}.tmp`
+  await fs.mkdir(path.dirname(file), { recursive: true })
+  await fs.writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
+  await fs.rename(tmp, file)
 }
 
 async function exists(file) {
@@ -56,19 +83,48 @@ async function exists(file) {
   }
 }
 
-async function getServiceStatus(apiBase) {
+async function douyinWebConfigStatus() {
+  if (!douyinWebConfigPath) {
+    return {
+      configured: false,
+      writable: false,
+      path: '',
+      detail: 'DOUYIN_WEB_CONFIG 未配置；Docker 默认内置解析容器不会把 Cookie 配置暴露给 UI 写入。',
+    }
+  }
+
   try {
-    const response = await fetch(`${apiBase.replace(/\/$/, '')}/openapi.json`, { signal: AbortSignal.timeout(3000) })
+    await fs.access(douyinWebConfigPath, fsConstants.R_OK | fsConstants.W_OK)
+    return {
+      configured: true,
+      writable: true,
+      path: douyinWebConfigPath,
+      detail: 'DOUYIN_WEB_CONFIG 指向的配置文件可写。',
+    }
+  } catch (error) {
+    return {
+      configured: true,
+      writable: false,
+      path: douyinWebConfigPath,
+      detail: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+async function getServiceStatus(apiBase) {
+  const effectiveApiBase = process.env.LOCAL_API_BASE || apiBase
+  try {
+    const response = await fetch(`${effectiveApiBase.replace(/\/$/, '')}/openapi.json`, { signal: AbortSignal.timeout(3000) })
     return {
       ok: response.ok,
-      apiBase,
+      apiBase: effectiveApiBase,
       checkedAt: new Date().toISOString(),
       error: response.ok ? undefined : `HTTP ${response.status}`,
     }
   } catch (error) {
     return {
       ok: false,
-      apiBase,
+      apiBase: effectiveApiBase,
       checkedAt: new Date().toISOString(),
       error: error instanceof Error ? error.message : String(error),
     }
@@ -104,6 +160,13 @@ async function latestRows(reports) {
   return Array.isArray(rows) ? rows : []
 }
 
+async function latestRowsByPrefix(reports, prefix) {
+  const latestJson = reports.find((report) => report.type === 'json' && report.name.startsWith(prefix))
+  if (!latestJson) return []
+  const rows = await readJson(latestJson.path, [])
+  return Array.isArray(rows) ? rows : []
+}
+
 async function reportRows(reportPath) {
   const rows = await readJson(reportPath, [])
   return Array.isArray(rows) ? rows : []
@@ -123,6 +186,24 @@ function asPositiveNumber(value, fallback) {
   return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback
 }
 
+function boundedNumber(value, fallback, min, max) {
+  const number = asPositiveNumber(value, fallback)
+  return Math.min(max, Math.max(min, number))
+}
+
+function normalizeLowFanConfig(value = {}) {
+  return {
+    fans_num: boundedNumber(value.fans_num, defaultLowFanConfig.fans_num, 100, 10000000),
+    likes: boundedNumber(value.likes, defaultLowFanConfig.likes, 1, 10000000),
+    collect: boundedNumber(value.collect, defaultLowFanConfig.collect, 1, 10000000),
+    comment: boundedNumber(value.comment, defaultLowFanConfig.comment, 1, 10000000),
+    share: boundedNumber(value.share, defaultLowFanConfig.share, 1, 10000000),
+    count: boundedNumber(value.count, defaultLowFanConfig.count, 5, 50),
+    max_pages: boundedNumber(value.max_pages, defaultLowFanConfig.max_pages, 1, 10),
+    route: Number(value.route) === 1 ? 1 : 2,
+  }
+}
+
 function runMonitor(args) {
   return new Promise((resolve) => {
     const command = `${python} ${monitorScript} ${args.join(' ')}`
@@ -134,6 +215,27 @@ function runMonitor(args) {
         stdout,
         stderr,
       })
+    })
+  })
+}
+
+function checkPythonModules(modules) {
+  return new Promise((resolve) => {
+    const code = `
+import importlib.util, json
+modules = ${JSON.stringify(modules)}
+print(json.dumps({name: importlib.util.find_spec(name) is not None for name in modules}))
+`
+    execFile(python, ['-c', code], { cwd: monitorDir, timeout: 1000 * 5, maxBuffer: 1024 * 64 }, (error, stdout) => {
+      if (error) {
+        resolve(Object.fromEntries(modules.map((module) => [module, false])))
+        return
+      }
+      try {
+        resolve(JSON.parse(stdout))
+      } catch {
+        resolve(Object.fromEntries(modules.map((module) => [module, false])))
+      }
     })
   })
 }
@@ -161,12 +263,120 @@ function parseMonitorOutput(stdout) {
   }
 }
 
+function maskSecret(value) {
+  if (!value) return ''
+  const normalized = String(value).trim()
+  if (normalized.length <= 10) return '已配置'
+  return `${normalized.slice(0, 6)}...${normalized.slice(-4)}`
+}
+
+async function readLocalEnvValues() {
+  const envPath = path.join(__dirname, '.env.local')
+  const values = {}
+  try {
+    const content = await fs.readFile(envPath, 'utf8')
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const index = trimmed.indexOf('=')
+      if (index < 0) continue
+      values[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1).trim()
+    }
+  } catch {
+    // Local env file is optional.
+  }
+  return values
+}
+
+async function writeLocalEnvValues(updates) {
+  const envPath = path.join(__dirname, '.env.local')
+  let lines = []
+  try {
+    lines = (await fs.readFile(envPath, 'utf8')).split(/\r?\n/)
+  } catch {
+    lines = []
+  }
+
+  const pending = new Map(Object.entries(updates).filter(([, value]) => typeof value === 'string' && value.trim()))
+  const next = lines.map((line) => {
+    const index = line.indexOf('=')
+    if (index < 0) return line
+    const key = line.slice(0, index).trim()
+    if (!pending.has(key)) return line
+    const value = pending.get(key).trim()
+    pending.delete(key)
+    return `${key}=${value}`
+  })
+
+  for (const [key, value] of pending) {
+    next.push(`${key}=${String(value).trim()}`)
+  }
+
+  await fs.writeFile(envPath, `${next.filter((line, index, array) => line.trim() || index < array.length - 1).join('\n')}\n`, 'utf8')
+}
+
+function normalizeProvider(value) {
+  const provider = String(value || 'faster-whisper').trim().toLowerCase()
+  return ['lemonfox', 'faster-whisper', 'whisper'].includes(provider) ? provider : 'faster-whisper'
+}
+
+async function settingsStatus(config = null) {
+  const envValues = await readLocalEnvValues()
+  const cfg = config || await readJson(configPath, {})
+  const transcription = cfg.transcription || {}
+  const tikhub = process.env.TIKHUB_API_KEY || envValues.TIKHUB_API_KEY || ''
+  const lemonfox = process.env.LEMONFOX_API_KEY || envValues.LEMONFOX_API_KEY || ''
+  const localApiBase = process.env.LOCAL_API_BASE || envValues.LOCAL_API_BASE || cfg.local_api_base || 'http://127.0.0.1:8091'
+  const modules = await checkPythonModules(['faster_whisper', 'whisper'])
+  const parserConfig = await douyinWebConfigStatus()
+  return {
+    tikhub: {
+      configured: Boolean(tikhub),
+      masked: maskSecret(tikhub),
+    },
+    lemonfox: {
+      configured: Boolean(lemonfox),
+      masked: maskSecret(lemonfox),
+    },
+    transcription: {
+      provider: normalizeProvider(process.env.TRANSCRIPTION_PROVIDER || transcription.provider),
+      language: process.env.TRANSCRIPTION_LANGUAGE || transcription.language || 'zh',
+      localModel: process.env.TRANSCRIPTION_LOCAL_MODEL || transcription.local_model || 'small',
+      localDevice: process.env.TRANSCRIPTION_LOCAL_DEVICE || transcription.local_device || 'auto',
+      localComputeType: process.env.TRANSCRIPTION_LOCAL_COMPUTE_TYPE || transcription.local_compute_type || 'int8',
+      prompt: process.env.TRANSCRIPTION_PROMPT || transcription.prompt || '请使用标点符号：，。、；：？！',
+      providers: {
+        lemonfox: {
+          available: Boolean(lemonfox),
+          detail: lemonfox ? 'LEMONFOX_API_KEY 已配置' : '需要配置 LEMONFOX_API_KEY',
+        },
+        fasterWhisper: {
+          available: Boolean(modules.faster_whisper),
+          detail: modules.faster_whisper ? 'Python 模块 faster_whisper 可用' : '当前 Python 环境缺少 faster-whisper',
+        },
+        whisper: {
+          available: Boolean(modules.whisper),
+          detail: modules.whisper ? 'Python 模块 whisper 可用' : '当前 Python 环境缺少 openai-whisper',
+        },
+      },
+    },
+    runtime: {
+      localApiBase,
+      pythonBin: python,
+      monitorDir,
+    },
+    parserConfig,
+  }
+}
+
 app.get('/api/dashboard', async (_req, res) => {
   const config = await readJson(configPath, {})
+  const lowFanConfig = normalizeLowFanConfig(config.low_fan_hits)
   const outputDir = path.resolve(monitorDir, config.output_dir || '../../douyin-monitor-output')
   const reports = await listReports(outputDir)
   const state = await readJson(config.state_path || path.join(outputDir, 'state.json'), {})
   const service = await getServiceStatus(config.local_api_base || 'http://127.0.0.1:8091')
+  const settings = await settingsStatus(config)
   res.json({
     service,
     config: {
@@ -174,18 +384,127 @@ app.get('/api/dashboard', async (_req, res) => {
       accounts: summarizeAccounts(config),
       countPerAccount: config.account_monitor?.count_per_account || 2,
       outputDir,
-      thresholds: config.low_fan_hits || {},
-      defaultLowFan: {
-        count: config.low_fan_hits?.count || 20,
-        pages: config.low_fan_hits?.max_pages || 2,
-        route: config.low_fan_hits?.route || 2,
+      thresholds: {
+        fans_num: lowFanConfig.fans_num,
+        likes: lowFanConfig.likes,
+        collect: lowFanConfig.collect,
+        comment: lowFanConfig.comment,
+        share: lowFanConfig.share,
       },
-      hasTikhubKey: Boolean(process.env.TIKHUB_API_KEY),
-      hasLemonfoxKey: Boolean(process.env.LEMONFOX_API_KEY),
+      defaultLowFan: {
+        count: lowFanConfig.count,
+        pages: lowFanConfig.max_pages,
+        route: lowFanConfig.route,
+      },
+      hasTikhubKey: settings.tikhub.configured,
+      hasLemonfoxKey: settings.lemonfox.configured,
+      integrations: settings,
     },
     reports,
     latestRows: await latestRows(reports),
+    latestLowfanRows: await latestRowsByPrefix(reports, 'lowfan_'),
+    latestAccountRows: await latestRowsByPrefix(reports, 'account_new'),
     state,
+  })
+})
+
+app.get('/api/settings/integrations', async (_req, res) => {
+  res.json(await settingsStatus())
+})
+
+app.post('/api/settings/integrations', async (req, res) => {
+  const tikhubKey = String(req.body?.tikhubKey || '').trim()
+  const lemonfoxKey = String(req.body?.lemonfoxKey || '').trim()
+  const transcription = req.body?.transcription || {}
+  const provider = normalizeProvider(transcription.provider)
+  const language = String(transcription.language || 'zh').trim() || 'zh'
+  const localModel = String(transcription.localModel || 'small').trim() || 'small'
+  const localDevice = String(transcription.localDevice || 'auto').trim() || 'auto'
+  const localComputeType = String(transcription.localComputeType || 'int8').trim() || 'int8'
+  const prompt = String(transcription.prompt || '请使用标点符号：，。、；：？！').trim()
+
+  const envUpdates = {
+    TRANSCRIPTION_PROVIDER: provider,
+    TRANSCRIPTION_LANGUAGE: language,
+    TRANSCRIPTION_LOCAL_MODEL: localModel,
+    TRANSCRIPTION_LOCAL_DEVICE: localDevice,
+    TRANSCRIPTION_LOCAL_COMPUTE_TYPE: localComputeType,
+    TRANSCRIPTION_PROMPT: prompt,
+  }
+  if (tikhubKey) envUpdates.TIKHUB_API_KEY = tikhubKey
+  if (lemonfoxKey) envUpdates.LEMONFOX_API_KEY = lemonfoxKey
+  await writeLocalEnvValues(envUpdates)
+
+  Object.assign(process.env, envUpdates)
+  if (tikhubKey) process.env.TIKHUB_API_KEY = tikhubKey
+  if (lemonfoxKey) process.env.LEMONFOX_API_KEY = lemonfoxKey
+
+  const config = await readJson(configPath, {})
+  config.transcription = {
+    ...(config.transcription || {}),
+    provider,
+    language,
+    local_model: localModel,
+    local_device: localDevice,
+    local_compute_type: localComputeType,
+    prompt,
+  }
+  await saveJson(configPath, config)
+
+  res.json({ ok: true, integrations: await settingsStatus(config) })
+})
+
+app.post('/api/settings/runtime', async (req, res) => {
+  const localApiBase = String(req.body?.localApiBase || '').trim()
+  const pythonBin = String(req.body?.pythonBin || '').trim()
+  const nextMonitorDir = String(req.body?.monitorDir || '').trim()
+  const updates = {}
+  if (localApiBase) updates.LOCAL_API_BASE = localApiBase
+  if (pythonBin) updates.PYTHON_BIN = pythonBin
+  if (nextMonitorDir) updates.MONITOR_DIR = nextMonitorDir
+  if (!Object.keys(updates).length) {
+    res.status(400).json({ ok: false, error: '没有可保存的后台配置' })
+    return
+  }
+  await writeLocalEnvValues(updates)
+  Object.assign(process.env, updates)
+  refreshRuntimeConfig()
+  res.json({ ok: true, integrations: await settingsStatus() })
+})
+
+app.post('/api/settings/thresholds', async (req, res) => {
+  const config = await readJson(configPath, {})
+  const current = normalizeLowFanConfig(config.low_fan_hits)
+  const body = req.body || {}
+  const next = normalizeLowFanConfig({
+    ...current,
+    fans_num: body.fansNum,
+    likes: body.likes,
+    collect: body.collect,
+    comment: body.comment,
+    share: body.share,
+    count: body.count,
+    max_pages: body.pages,
+    route: body.route,
+  })
+
+  config.low_fan_hits = next
+  await saveJson(configPath, config)
+
+  res.json({
+    ok: true,
+    thresholds: {
+      fans_num: next.fans_num,
+      likes: next.likes,
+      collect: next.collect,
+      comment: next.comment,
+      share: next.share,
+    },
+    defaultLowFan: {
+      count: next.count,
+      pages: next.max_pages,
+      route: next.route,
+    },
   })
 })
 
@@ -209,6 +528,8 @@ app.post('/api/run/account', async (req, res) => {
 
 app.post('/api/run/lowfan', async (req, res) => {
   const body = req.body || {}
+  const config = await readJson(configPath, {})
+  const lowFanConfig = normalizeLowFanConfig(config.low_fan_hits)
   const args = [
     'lowfan-search',
     body.keyword || 'AI智能体',
@@ -221,9 +542,9 @@ app.post('/api/run/lowfan', async (req, res) => {
     '--route',
     String(body.route === 2 || body.route === '2' ? 2 : 1),
     '--pages',
-    String(asPositiveNumber(body.pages, 1)),
+    String(asPositiveNumber(body.pages, lowFanConfig.max_pages)),
     '--count',
-    String(asPositiveNumber(body.count, 20)),
+    String(asPositiveNumber(body.count, lowFanConfig.count)),
   ]
   if (body.fallbackRoute !== false) args.push('--fallback-route')
   res.json(await runMonitorWithRows(args))
@@ -236,7 +557,12 @@ app.post('/api/settings/douyin-session', async (req, res) => {
     return
   }
   if (!douyinWebConfigPath) {
-    res.status(400).json({ ok: false, error: 'DOUYIN_WEB_CONFIG 未配置' })
+    res.status(400).json({ ok: false, error: 'DOUYIN_WEB_CONFIG 未配置；请先挂载解析服务 config.yaml 并设置该路径。' })
+    return
+  }
+  const configStatus = await douyinWebConfigStatus()
+  if (!configStatus.writable) {
+    res.status(400).json({ ok: false, error: `DOUYIN_WEB_CONFIG 不可写：${configStatus.detail}` })
     return
   }
 
@@ -252,7 +578,8 @@ app.post('/api/settings/douyin-session', async (req, res) => {
 app.use('/assets', express.static(path.join(__dirname, 'dist')))
 
 await loadLocalEnv()
+refreshRuntimeConfig()
 
-app.listen(port, '127.0.0.1', () => {
-  console.log(`Douyin monitor API listening on http://127.0.0.1:${port}`)
+app.listen(port, host, () => {
+  console.log(`Douyin monitor API listening on http://${host}:${port}`)
 })

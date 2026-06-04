@@ -1,128 +1,210 @@
 # Douyin Hot Monitor Studio
 
-A local-first Douyin content intelligence dashboard for:
+面向运营团队的抖音内容监控工作台：低粉爆款搜索、对标账号监控、视频下载、口播转文字、报告归档都放在一个本地页面里。
 
-- finding low-follower viral videos by keyword;
-- monitoring benchmark Douyin accounts;
-- collecting cover links, video links, CSV/JSON/Markdown reports;
-- optionally downloading videos and transcribing spoken scripts.
+## 能做什么
 
-The project is a lightweight replacement for n8n-style Douyin monitoring workflows. It ships with a React + TypeScript + Tailwind UI, a small Express control API, and a Python monitor CLI.
+- 低粉爆款搜索：按关键词找粉丝不高但互动跑出来的作品。
+- 对标账号监控：按 `sec_user_id` 账号池抓取最新作品。
+- 内置解析服务：Compose 默认随项目启动 `Douyin_TikTok_Download_API` 兼容容器，用于账号作品、无水印下载和登录态接口。
+- 视频与文稿归档：可下载无水印视频，并用 Lemonfox 或本地 Whisper 转写口播。
+- 运行报告：每次运行生成 JSON、CSV、Markdown，默认在 `douyin-monitor-output/runs`。
+- 本地配置页：在网页里配置 TikHub、Lemonfox、转写方式和本地解析服务地址。
 
-## What It Does
-
-- Low-follower viral search through TikHub.
-- Benchmark account monitoring through a local Douyin parser service.
-- Viral scoring and hit reasons for search results.
-- Local report archive under `douyin-monitor-output/runs`.
-- Session ID update endpoint for the local parser config.
-- Dark information-stream UI inspired by AI news dashboards.
-
-## Project Structure
+## 服务边界
 
 ```text
 douyin-hot-monitor-studio/
-  douyin-monitor/        Python monitor CLI and config
-  douyin-monitor-ui/     React dashboard and Express control API
-  README.md
+  douyin-monitor/        Python 监控 CLI，负责搜索、账号监控、下载、转写、报告
+  douyin-monitor-ui/     React 前端 + Express 控制 API
+  docker-compose.yml     一键启动 UI/API/监控 CLI/内置抖音解析服务
+  AGENTS.md              给 Codex/维护者的项目规则
 ```
 
-## Requirements
-
-- Node.js 20+
-- Python 3.10+
-- A TikHub API token for low-follower viral search
-- Optional Lemonfox API token for transcription
-- Optional local Douyin parser service for account monitoring and downloads
-
-For the parser service, this project expects a compatible local API at:
+`docker compose up -d --build` 默认会同时启动：
 
 ```text
-http://127.0.0.1:8091
+douyin-parser       evil0ctal/douyin_tiktok_download_api，容器内地址 http://douyin-parser
+douyin-monitor-ui   React 前端 + Express 控制 API + Python 监控 CLI
 ```
 
-The original internal setup used `Douyin_TikTok_Download_API`; any compatible endpoint with `/api/douyin/web/fetch_user_post_videos`, `/api/download`, and `/openapi.json` should work.
+宿主机打开 `http://127.0.0.1:8091/openapi.json` 可以检查解析服务是否在线。前端容器内部使用 `LOCAL_API_BASE=http://douyin-parser`，本地开发时继续用 `http://127.0.0.1:8091`。
 
-## Setup
+## 是否免费
 
-```bash
-cd douyin-hot-monitor-studio/douyin-monitor-ui
-npm install
-cp .env.example .env.local
-```
+- TikHub：不是长期无限免费。官方 pricing 页显示有新账号免费请求额度，正式使用按请求或套餐计费。低粉爆款搜索依赖它。
+- Lemonfox：不是永久免费。官方首页显示有免费试用，正式语音转文字按月/积分计费。云端批量转写会消耗额度。
+- 内置解析服务：本项目会编排 `Douyin_TikTok_Download_API` 兼容容器，能力属于本项目启动链路的一部分；但私有化部署仍有服务器、代理、Cookie、风控和维护成本。
+- faster-whisper / openai-whisper：开源本地方案，不按 API 次数付费，但需要本机算力、模型下载空间和视频文件。
 
-Edit `.env.local`:
+具体价格会变，商业使用前以各自官网和后台账单为准。
+
+## 最小配置
+
+如果只跑低粉爆款搜索：
 
 ```bash
 TIKHUB_API_KEY=Bearer your_tikhub_token
+```
+
+如果要云端口播转写：
+
+```bash
 LEMONFOX_API_KEY=your_lemonfox_token
-PYTHON_BIN=python3
-MONITOR_DIR=../douyin-monitor
+TRANSCRIPTION_PROVIDER=lemonfox
 ```
 
-Then configure monitored accounts:
+默认转写使用本地 faster-whisper：
 
 ```bash
-cd ../douyin-monitor
-cp config.example.json config.json
+TRANSCRIPTION_PROVIDER=faster-whisper
+# 或 TRANSCRIPTION_PROVIDER=whisper
 ```
 
-Edit `config.json` and add your own Douyin `sec_user_id` list.
-
-## Run
-
-Start the dashboard:
+本地解析服务默认地址：
 
 ```bash
-cd douyin-hot-monitor-studio/douyin-monitor-ui
-npm run dev
+LOCAL_API_BASE=http://127.0.0.1:8091
 ```
 
-Open:
+Docker Compose 启动时会覆盖为：
+
+```bash
+LOCAL_API_BASE=http://douyin-parser
+```
+
+## 推荐启动方式
+
+1. 克隆项目并初始化配置：
+
+```bash
+git clone https://github.com/Standed/douyin-hot-monitor-studio.git
+cd douyin-hot-monitor-studio
+cp douyin-monitor-ui/.env.example douyin-monitor-ui/.env.local
+cp douyin-monitor/config.example.json douyin-monitor/config.json
+```
+
+2. 编辑 `douyin-monitor-ui/.env.local`，至少填 `TIKHUB_API_KEY`。需要云端转写再填 `LEMONFOX_API_KEY`。
+
+3. 编辑 `douyin-monitor/config.json`，把 `account_monitor.accounts` 换成你的对标账号：
+
+```json
+{
+  "name": "example account",
+  "sec_user_id": "replace_with_douyin_sec_user_id"
+}
+```
+
+4. 启动本项目：
+
+```bash
+docker compose up -d --build
+```
+
+打开：
 
 ```text
 http://127.0.0.1:5174/
 ```
 
-The Express control API runs at:
+控制 API：
 
 ```text
 http://127.0.0.1:8787/
 ```
 
-## CLI Usage
+解析服务健康检查：
 
-Low-follower viral search:
+```text
+http://127.0.0.1:8091/openapi.json
+```
+
+## 抖音 Cookie
+
+低粉爆款搜索主要依赖 TikHub，不一定需要抖音 Cookie。账号监控、下载和部分解析接口可能会受抖音登录态和风控影响。
+
+默认 Compose 为了做到一键启动，只直接运行 `douyin-parser` 镜像，不会把解析服务容器里的 Cookie 配置文件暴露给 UI 写入。因此页面里的“抖音登录态”会显示为不可写，这是正常状态。
+
+如果需要在 UI 里保存 `sessionid`，要额外挂载解析服务的 `config.yaml` 给 parser 容器使用，并把同一个文件以可写路径挂到 UI 容器，然后在 `douyin-monitor-ui/.env.local` 设置：
 
 ```bash
-cd douyin-hot-monitor-studio/douyin-monitor
+DOUYIN_WEB_CONFIG=/app/parser-config/douyin_web_config.yaml
+```
+
+也可以直接使用旁边完整的 `../Douyin_TikTok_Download_API/` 项目来做高级管理，例如 Cookie、代理和单独部署，再把本项目的 `LOCAL_API_BASE` 指向那个服务。
+
+## 本地开发
+
+```bash
+cd douyin-monitor-ui
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+前端默认 `http://127.0.0.1:5174/`，Express 控制 API 默认 `http://127.0.0.1:8787/`。
+
+本地开发如果不使用 Compose，需要另外启动兼容的抖音解析服务，并让 `.env.local` 保持：
+
+```bash
+LOCAL_API_BASE=http://127.0.0.1:8091
+```
+
+## 转写怎么选
+
+Lemonfox 适合不想维护本地模型、希望快速拿结果的团队。缺点是要付费，批量跑会消耗额度。
+
+faster-whisper 适合批量监控和私有化场景。建议优先选它，本地速度和资源占用通常比 openai-whisper 更适合运营批处理：
+
+```bash
+python3 -m pip install faster-whisper
+```
+
+Docker Compose 默认只安装 `faster-whisper`，避免首次构建时拉取 `openai-whisper` 关联的 `torch/CUDA` 大依赖。
+
+openai-whisper 适合已有 Whisper 环境或更熟悉原版工具的用户：
+
+```bash
+python3 -m pip install openai-whisper
+```
+
+本地转写注意：
+
+- 运行账号监控时勾选“下载无水印视频”和“提取口播文稿”。
+- 默认模型 `small` 比较均衡；机器弱可以改 `tiny/base`，要更准再改 `medium/large-v3`。
+- 本地模型首次运行会下载模型文件，耗时取决于网络和机器性能。
+
+## CLI
+
+低粉爆款搜索：
+
+```bash
+cd douyin-monitor
 export TIKHUB_API_KEY="Bearer your_tikhub_token"
 python3 douyin_monitor.py lowfan-search "AI智能体" --publish-time 最近一周 --sort 最多点赞 --route 2 --fallback-route
 ```
 
-Benchmark account monitoring:
+对标账号监控：
 
 ```bash
 python3 douyin_monitor.py account-run --limit 2 --max-accounts 3 --include-seen
 ```
 
-Health check for the local parser:
+本地解析服务健康检查：
 
 ```bash
 python3 douyin_monitor.py health
 ```
 
-## Security
+## 不要提交
 
-Do not commit:
+- `douyin-monitor-ui/.env.local`
+- `douyin-monitor/config.json`
+- 抖音 `sessionid`
+- TikHub / Lemonfox Token
+- `douyin-monitor-output/`
+- 下载视频、转写文稿和运行日志
 
-- `.env.local`
-- `config.json` with private account lists if you do not want them public
-- parser cookies, Douyin `sessionid`, TikHub tokens, Lemonfox tokens
-- generated reports or downloaded media
+## 维护备注
 
-This repository includes `.env.example` and `config.example.json` for safe public sharing.
-
-## Notes
-
-TikHub endpoint behavior can change. Route 2 (`douyin/search/fetch_video_search_v1`) is the current default because it has been more stable in testing. Route 1 is still available from the UI and CLI.
+TikHub 接口可能变化。当前默认 route 2：`douyin/search/fetch_video_search_v1`，route 1 仍保留在 UI 和 CLI 里作为备用线路。

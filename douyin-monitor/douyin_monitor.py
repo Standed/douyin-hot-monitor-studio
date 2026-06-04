@@ -22,6 +22,7 @@ DEFAULT_CONFIG = ROOT / "config.json"
 PUBLISH_TIME_MAP = {"不限": 0, "最近一天": 1, "最近一周": 7, "最近半年": 180}
 DURATION_MAP = {"不限": "0", "1 分钟以内": "0-1", "1-5 分钟": "1-5", "5 分钟以上": "5-10000"}
 SORT_TYPE_MAP = {"综合排序": 0, "最多点赞": 1, "最新发布": 2}
+LOCAL_TRANSCRIPTION_PROVIDERS = {"faster-whisper", "whisper"}
 
 
 def load_json(path: Path, default: Any) -> Any:
@@ -199,6 +200,27 @@ def add_analysis_fields(row: dict[str, Any], cfg: dict[str, Any]) -> dict[str, A
     return row
 
 
+def env_or_config(config: dict[str, Any], key: str, default: str = "") -> str:
+    env_key = f"TRANSCRIPTION_{key.upper()}"
+    env_value = os.environ.get(env_key)
+    if env_value is not None:
+        return env_value
+    value = (config.get("transcription") or {}).get(key, default)
+    return str(value if value is not None else default)
+
+
+def transcription_settings(config: dict[str, Any]) -> dict[str, str]:
+    provider = env_or_config(config, "provider", "faster-whisper").strip().lower() or "faster-whisper"
+    return {
+        "provider": provider,
+        "language": env_or_config(config, "language", "zh").strip(),
+        "prompt": env_or_config(config, "prompt", "请使用标点符号：，。、；：？！").strip(),
+        "local_model": env_or_config(config, "local_model", "small").strip() or "small",
+        "local_device": env_or_config(config, "local_device", "auto").strip() or "auto",
+        "local_compute_type": env_or_config(config, "local_compute_type", "int8").strip() or "int8",
+    }
+
+
 def write_report(output_dir: Path, prefix: str, rows: list[dict[str, Any]]) -> dict[str, str]:
     run_dir = output_dir / "runs"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -210,7 +232,12 @@ def write_report(output_dir: Path, prefix: str, rows: list[dict[str, Any]]) -> d
     public_rows = [{k: v for k, v in row.items() if k != "raw"} for row in rows]
     save_json(json_path, public_rows)
 
-    fields = ["video_id", "title", "author", "source_account", "keyword", "follower_count", "like_count", "comment_count", "collect_count", "share_count", "viral_score", "hit_reason", "create_time", "url", "cover_url", "video_url"]
+    fields = [
+        "video_id", "title", "author", "source_account", "keyword", "follower_count", "like_count",
+        "comment_count", "collect_count", "share_count", "viral_score", "hit_reason", "create_time",
+        "url", "cover_url", "video_url", "local_video_path", "transcript_provider", "transcript_status",
+        "transcript_path", "srt_path", "transcript_error", "download_error",
+    ]
     with csv_path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
@@ -233,7 +260,7 @@ def write_report(output_dir: Path, prefix: str, rows: list[dict[str, Any]]) -> d
 
 
 def health(config: dict[str, Any]) -> int:
-    base = config["local_api_base"].rstrip("/")
+    base = os.environ.get("LOCAL_API_BASE", config["local_api_base"]).rstrip("/")
     try:
         request_json(f"{base}/openapi.json", timeout=5)
     except Exception as exc:
@@ -253,7 +280,7 @@ def account_run(
     max_accounts: int | None = None,
     timeout: int = 35,
 ) -> int:
-    base = config["local_api_base"].rstrip("/")
+    base = os.environ.get("LOCAL_API_BASE", config["local_api_base"]).rstrip("/")
     account_cfg = config["account_monitor"]
     output_dir = resolve_path(config["output_dir"])
     state_path = resolve_path(config["state_path"])
@@ -262,6 +289,7 @@ def account_run(
     count = int(limit or account_cfg.get("count_per_account", 2))
     do_download = account_cfg.get("download_video", False) if download is None else download
     do_transcribe = account_cfg.get("transcribe", False) if transcribe is None else transcribe
+    transcript_cfg = transcription_settings(config)
 
     new_rows: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
@@ -289,7 +317,9 @@ def account_run(
             if do_download:
                 download_video(base, row, output_dir)
             if do_transcribe:
-                transcribe_video(row, output_dir)
+                if transcript_cfg["provider"] in LOCAL_TRANSCRIPTION_PROVIDERS and not row.get("local_video_path"):
+                    download_video(base, row, output_dir)
+                transcribe_video(row, output_dir, transcript_cfg)
         time.sleep(0.6)
 
     state["seen_aweme_ids"] = sorted(seen)
@@ -401,7 +431,23 @@ def download_video(base: str, row: dict[str, Any], output_dir: Path) -> None:
     row["local_video_path"] = str(path)
 
 
-def transcribe_video(row: dict[str, Any], output_dir: Path) -> None:
+def transcribe_video(row: dict[str, Any], output_dir: Path, settings: dict[str, str]) -> None:
+    provider = settings.get("provider", "faster-whisper")
+    row["transcript_provider"] = provider
+    if provider == "lemonfox":
+        transcribe_video_with_lemonfox(row, output_dir, settings)
+        return
+    if provider == "faster-whisper":
+        transcribe_video_with_faster_whisper(row, output_dir, settings)
+        return
+    if provider == "whisper":
+        transcribe_video_with_whisper(row, output_dir, settings)
+        return
+    row["transcript_status"] = "skipped_unknown_provider"
+    row["transcript_error"] = f"Unsupported transcription provider: {provider}"
+
+
+def transcribe_video_with_lemonfox(row: dict[str, Any], output_dir: Path, settings: dict[str, str]) -> None:
     api_key = os.environ.get("LEMONFOX_API_KEY")
     video_url = row.get("video_url")
     if not api_key or not video_url:
@@ -409,9 +455,9 @@ def transcribe_video(row: dict[str, Any], output_dir: Path) -> None:
         return
     body = urllib.parse.urlencode({
         "file": video_url + ("" if video_url.endswith(".mp4") else ".mp4"),
-        "language": "chinese",
+        "language": normalize_lemonfox_language(settings.get("language")),
         "response_format": "srt",
-        "Prompt": "请使用标点符号：，。、；：？！",
+        "Prompt": settings.get("prompt") or "请使用标点符号：，。、；：？！",
     }).encode("utf-8")
     req = urllib.request.Request(
         "https://api.lemonfox.ai/v1/audio/transcriptions",
@@ -425,6 +471,107 @@ def transcribe_video(row: dict[str, Any], output_dir: Path) -> None:
     except Exception as exc:
         row["transcript_error"] = str(exc)
         return
+    write_transcript_files(row, output_dir, srt)
+
+
+def transcribe_video_with_faster_whisper(row: dict[str, Any], output_dir: Path, settings: dict[str, str]) -> None:
+    local_video_path = row.get("local_video_path")
+    if not local_video_path:
+        row["transcript_status"] = "skipped_missing_local_video"
+        return
+    try:
+        from faster_whisper import WhisperModel  # type: ignore
+    except ImportError:
+        row["transcript_error"] = "Missing faster-whisper. Install it in the Python environment, then retry."
+        return
+    try:
+        model = WhisperModel(
+            settings.get("local_model") or "small",
+            device=settings.get("local_device") or "auto",
+            compute_type=settings.get("local_compute_type") or "int8",
+        )
+        segments, _info = model.transcribe(
+            local_video_path,
+            language=normalize_whisper_language(settings.get("language")),
+            initial_prompt=settings.get("prompt") or None,
+            vad_filter=True,
+        )
+        write_transcript_files(row, output_dir, segments_to_srt([
+            {"start": segment.start, "end": segment.end, "text": segment.text}
+            for segment in segments
+        ]))
+    except Exception as exc:
+        row["transcript_error"] = str(exc)
+
+
+def transcribe_video_with_whisper(row: dict[str, Any], output_dir: Path, settings: dict[str, str]) -> None:
+    local_video_path = row.get("local_video_path")
+    if not local_video_path:
+        row["transcript_status"] = "skipped_missing_local_video"
+        return
+    try:
+        import whisper  # type: ignore
+    except ImportError:
+        row["transcript_error"] = "Missing openai-whisper. Install it in the Python environment, then retry."
+        return
+    try:
+        model = whisper.load_model(settings.get("local_model") or "small")
+        result = model.transcribe(
+            local_video_path,
+            language=normalize_whisper_language(settings.get("language")),
+            initial_prompt=settings.get("prompt") or None,
+        )
+        write_transcript_files(row, output_dir, segments_to_srt(result.get("segments") or []))
+    except Exception as exc:
+        row["transcript_error"] = str(exc)
+
+
+def normalize_whisper_language(language: str | None) -> str | None:
+    if not language:
+        return None
+    normalized = language.strip().lower()
+    if normalized in {"chinese", "zh-cn", "zh_hans"}:
+        return "zh"
+    if normalized in {"auto", "自动"}:
+        return None
+    return normalized
+
+
+def normalize_lemonfox_language(language: str | None) -> str:
+    if not language:
+        return "chinese"
+    normalized = language.strip().lower()
+    if normalized in {"zh", "zh-cn", "zh_hans", "中文"}:
+        return "chinese"
+    return normalized
+
+
+def segments_to_srt(segments: list[Any]) -> str:
+    lines = []
+    for index, segment in enumerate(segments, 1):
+        if isinstance(segment, dict):
+            start = float(segment.get("start") or 0)
+            end = float(segment.get("end") or start)
+            text = str(segment.get("text") or "").strip()
+        else:
+            start = float(getattr(segment, "start", 0))
+            end = float(getattr(segment, "end", start))
+            text = str(getattr(segment, "text", "")).strip()
+        if not text:
+            continue
+        lines.extend([str(index), f"{srt_timestamp(start)} --> {srt_timestamp(end)}", text, ""])
+    return "\n".join(lines).strip() + "\n"
+
+
+def srt_timestamp(seconds: float) -> str:
+    milliseconds = max(0, round(seconds * 1000))
+    hours, remainder = divmod(milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def write_transcript_files(row: dict[str, Any], output_dir: Path, srt: str) -> None:
     folder = output_dir / "assets" / safe_name(row.get("title") or row["video_id"], 28)
     folder.mkdir(parents=True, exist_ok=True)
     srt_path = folder / "subtitle.srt"
@@ -433,6 +580,7 @@ def transcribe_video(row: dict[str, Any], output_dir: Path) -> None:
     txt_path.write_text(srt_to_text(srt), encoding="utf-8")
     row["srt_path"] = str(srt_path)
     row["transcript_path"] = str(txt_path)
+    row["transcript_status"] = "ok"
 
 
 def srt_to_text(srt: str) -> str:

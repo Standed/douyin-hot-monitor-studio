@@ -1,0 +1,31 @@
+services:
+  douyin-parser:
+    image: evil0ctal/douyin_tiktok_download_api:latest
+    restart: unless-stopped
+    ports:
+      - "8091:80"
+    environment:
+      TZ: Asia/Shanghai
+
+  douyin-monitor-ui:
+    build:
+      context: .
+      dockerfile: ./douyin-monitor-ui/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - douyin-parser
+    env_file:
+      - ./douyin-monitor-ui/.env.local
+    ports:
+      - "5174:5174"
+      - "8787:8787"
+    environment:
+      HOST: 0.0.0.0
+      PYTHON_BIN: python3
+      MONITOR_DIR: /app/douyin-monitor
+      LOCAL_API_BASE: http://douyin-parser
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-faster-whisper}
+    volumes:
+      - ./douyin-monitor:/app/douyin-monitor
+      - ./douyin-monitor-output:/douyin-monitor-output
+      - ./douyin-monitor-ui/.env.local:/app/.env.local

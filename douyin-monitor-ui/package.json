@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm:api\" \"npm:web\"",
     "web": "vite --host 127.0.0.1 --port 5174",
+    "dev:docker": "concurrently \"npm:api\" \"vite --host 0.0.0.0 --port 5174\"",
     "api": "node server.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

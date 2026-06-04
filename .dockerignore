@@ -1,0 +1,13 @@
+.git
+.DS_Store
+**/.DS_Store
+
+douyin-monitor-ui/node_modules
+douyin-monitor-ui/dist
+douyin-monitor-ui/.env.local
+douyin-monitor-ui/dev.log
+
+douyin-monitor/config.json
+douyin-monitor-output
+**/__pycache__
+**/*.pyc
