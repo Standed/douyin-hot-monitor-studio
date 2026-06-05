@@ -180,18 +180,6 @@ a {
   line-height: 1.15;
 }
 
-.brand-copy span {
-  color: #7dd3fc;
-  font-size: 12px;
-  font-weight: 850;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-:root[data-theme="light"] .brand-copy span {
-  color: #0284c7;
-}
-
 .nav-list {
   display: flex;
   flex: 1;

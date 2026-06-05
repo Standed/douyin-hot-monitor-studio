@@ -296,15 +296,15 @@ type PageId = 'overview' | 'lowfan' | 'accounts' | 'settings' | 'reports' | 'ops
 
 const pageIds: PageId[] = ['overview', 'lowfan', 'accounts', 'settings', 'reports', 'ops', 'about', 'feedback']
 
-const navItems: Array<{ id: PageId; icon: IconComponent; label: string; desc: string }> = [
-  { id: 'overview', icon: Zap, label: '素材精选', desc: '结果和资产' },
-  { id: 'lowfan', icon: Search, label: '低粉爆款', desc: '关键词发现' },
-  { id: 'accounts', icon: LayoutList, label: '监控账号', desc: '账号池巡检' },
-  { id: 'settings', icon: Settings2, label: '接口配置', desc: 'TikHub / Lemonfox' },
-  { id: 'reports', icon: FileText, label: '归档报告', desc: 'JSON / CSV / MD' },
-  { id: 'ops', icon: ShieldCheck, label: '运行诊断', desc: '服务和错误' },
-  { id: 'about', icon: Heart, label: '使用说明', desc: '用途和替代方案' },
-  { id: 'feedback', icon: MessageSquareText, label: '反馈', desc: '建议和问题' },
+const navItems: Array<{ id: PageId; icon: IconComponent; label: string }> = [
+  { id: 'overview', icon: Zap, label: '素材精选' },
+  { id: 'lowfan', icon: Search, label: '低粉爆款' },
+  { id: 'accounts', icon: LayoutList, label: '监控账号' },
+  { id: 'settings', icon: Settings2, label: '接口配置' },
+  { id: 'reports', icon: FileText, label: '归档报告' },
+  { id: 'ops', icon: ShieldCheck, label: '运行诊断' },
+  { id: 'about', icon: Heart, label: '使用说明' },
+  { id: 'feedback', icon: MessageSquareText, label: '反馈' },
 ]
 
 const primaryPageIds: PageId[] = ['overview', 'lowfan', 'accounts', 'settings', 'reports']
@@ -964,13 +964,12 @@ function App() {
           </div>
           <div className="brand-copy">
             <strong>素材雷达</strong>
-            <span>Douyin Ops</span>
           </div>
         </div>
 
         <nav className="nav-list">
           {navItems.map((item) => (
-            <NavItem active={activePage === item.id} desc={item.desc} icon={item.icon} key={item.id} label={item.label} onClick={() => navigate(item.id)} />
+            <NavItem active={activePage === item.id} icon={item.icon} key={item.id} label={item.label} onClick={() => navigate(item.id)} />
           ))}
         </nav>
 
@@ -998,7 +997,6 @@ function App() {
           <>
             <header className="stream-header">
               <div>
-                <span className="page-eyebrow">{currentPage.eyebrow}</span>
                 <h1>{currentPage.title}</h1>
                 <p>{currentPage.description}</p>
               </div>
@@ -1066,7 +1064,6 @@ function App() {
         {isUtilityPage && (
           <section className="utility-heading">
             <div>
-              <span className="page-eyebrow">{currentPage.eyebrow}</span>
               <h1>{currentPage.title}</h1>
               <p>{currentPage.description}</p>
             </div>
@@ -1216,14 +1213,11 @@ function App() {
   )
 }
 
-function NavItem({ active, desc, icon: Icon, label, onClick }: { active?: boolean; desc: string; icon: IconComponent; label: string; onClick: () => void }) {
+function NavItem({ active, icon: Icon, label, onClick }: { active?: boolean; icon: IconComponent; label: string; onClick: () => void }) {
   return (
     <button className={active ? 'nav-item active' : 'nav-item'} onClick={onClick}>
       <Icon className="size-5" />
-      <span>
-        {label}
-        <small>{desc}</small>
-      </span>
+      <span>{label}</span>
     </button>
   )
 }
