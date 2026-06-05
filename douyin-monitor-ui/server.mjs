@@ -33,6 +33,8 @@ const defaultLowFanConfig = {
   route: 2,
 }
 
+const defaultCardMaxRows = 8
+
 app.use(cors())
 app.use(express.json())
 
@@ -422,6 +424,122 @@ async function sendFeedbackNotification(feedback, webhook) {
   return { configured: true, sent: true }
 }
 
+function feishuBaseSettings(envValues = {}) {
+  const appId = process.env.FEISHU_BASE_APP_ID || envValues.FEISHU_BASE_APP_ID || process.env.LARK_APP_ID || envValues.LARK_APP_ID || ''
+  const appSecret = process.env.FEISHU_BASE_APP_SECRET || envValues.FEISHU_BASE_APP_SECRET || process.env.LARK_APP_SECRET || envValues.LARK_APP_SECRET || ''
+  const baseToken = process.env.FEISHU_BASE_APP_TOKEN || envValues.FEISHU_BASE_APP_TOKEN || process.env.FEISHU_BASE_TOKEN || envValues.FEISHU_BASE_TOKEN || ''
+  const tableId = process.env.FEISHU_BASE_TABLE_ID || envValues.FEISHU_BASE_TABLE_ID || ''
+  return {
+    configured: Boolean(appId && appSecret && baseToken && tableId),
+    appId,
+    appSecret,
+    baseToken,
+    tableId,
+    baseUrl: baseToken ? `https://xiyangshiai.feishu.cn/base/${baseToken}` : '',
+  }
+}
+
+function safeIsoDateTime(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(+date)) return new Date().toISOString()
+  return date.toISOString()
+}
+
+function reportRunId(reports = {}) {
+  const name = reportFileName(reports.md || reports.json || reports.csv)
+  return name ? name.replace(/\.(md|json|csv)$/i, '') : safeIsoDateTime()
+}
+
+async function feishuTenantAccessToken(settings) {
+  const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      app_id: settings.appId,
+      app_secret: settings.appSecret,
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || payload.code !== 0 || !payload.tenant_access_token) {
+    throw new Error(payload.msg || `tenant_access_token HTTP ${response.status}`)
+  }
+  return payload.tenant_access_token
+}
+
+function feishuRecordFields(kind, result, row, index, envValues = {}) {
+  const reports = result.parsed?.reports || {}
+  const runId = reportRunId(reports)
+  return {
+    运行ID: runId,
+    运行类型: kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控',
+    本次序号: index + 1,
+    标题: truncateText(row.title || '未命名作品', 500),
+    作者: row.author || '',
+    来源账号: row.source_account || '',
+    关键词: row.keyword || '',
+    视频ID: row.video_id || '',
+    原视频链接: row.url || '',
+    封面链接: row.cover_url || '',
+    视频源链接: row.video_url || '',
+    粉丝数: Number(row.follower_count || 0),
+    点赞数: Number(row.like_count || 0),
+    评论数: Number(row.comment_count || 0),
+    收藏数: Number(row.collect_count || 0),
+    转发数: Number(row.share_count || 0),
+    爆款分: Number(row.viral_score || 0),
+    推荐理由: row.hit_reason || '',
+    发布时间: row.create_time || '',
+    来源API: sourceApiLabel(row.source_api),
+    Markdown报告: reportLink(reports.md, envValues) || reportFileName(reports.md),
+    CSV报告: reportLink(reports.csv, envValues) || reportFileName(reports.csv),
+    同步时间: safeIsoDateTime(),
+  }
+}
+
+async function syncRunToFeishuBase(kind, result, envValues = {}) {
+  const settings = feishuBaseSettings(envValues)
+  const rows = Array.isArray(result.rows) ? result.rows : []
+  if (!settings.configured) {
+    return { configured: false, synced: false, count: 0 }
+  }
+  if (!rows.length) {
+    return { configured: true, synced: true, count: 0, baseUrl: settings.baseUrl }
+  }
+
+  try {
+    const token = await feishuTenantAccessToken(settings)
+    const records = rows.slice(0, 200).map((row, index) => ({
+      fields: feishuRecordFields(kind, result, row, index, envValues),
+    }))
+    const response = await fetch(`https://open.feishu.cn/open-apis/bitable/v1/apps/${settings.baseToken}/tables/${settings.tableId}/records/batch_create`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ records }),
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.code !== 0) {
+      throw new Error(payload.msg || `bitable batch_create HTTP ${response.status}`)
+    }
+    return {
+      configured: true,
+      synced: true,
+      count: records.length,
+      baseUrl: settings.baseUrl,
+    }
+  } catch (error) {
+    return {
+      configured: true,
+      synced: false,
+      count: 0,
+      baseUrl: settings.baseUrl,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 function truncateText(value, maxLength = 80) {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
@@ -498,6 +616,7 @@ function runCardRow(row, index) {
 function runSummaryMarkdown(kind, result, reports, envValues) {
   const rows = Array.isArray(result.rows) ? result.rows : []
   const errors = Array.isArray(result.parsed?.errors) ? result.parsed.errors : []
+  const baseSync = result.baseSync || {}
   const reportName = reportFileName(reports.md) || reportFileName(reports.csv)
   const summary = [
     `**结果**：${rows.length} 条`,
@@ -523,6 +642,13 @@ function runSummaryMarkdown(kind, result, reports, envValues) {
   if (!link) {
     summary.push('提示：配置 DY_HOT_PUBLIC_URL 或 FEISHU_REPORT_BASE_URL 后，群卡片会出现可点击报告按钮。')
   }
+  if (baseSync.configured && baseSync.synced) {
+    summary.push(`**飞书多维表格**：已同步 ${baseSync.count || 0} 条`)
+  } else if (baseSync.configured && !baseSync.synced) {
+    summary.push(`**飞书多维表格**：同步失败，${cleanCardText(truncateText(baseSync.error || '请检查 Base 配置和字段结构', 80))}`)
+  } else {
+    summary.push('**飞书多维表格**：未配置，配置 FEISHU_BASE_APP_TOKEN / FEISHU_BASE_TABLE_ID 后会自动入库。')
+  }
 
   return summary.join('\n')
 }
@@ -545,10 +671,17 @@ async function sendRunNotification(kind, result, webhook, envValues = {}) {
 
   if (rows.length) {
     elements.push({ tag: 'hr' })
-    for (const [index, row] of rows.slice(0, 3).entries()) {
+    const maxRows = boundedNumber(process.env.FEISHU_CARD_MAX_ROWS || envValues.FEISHU_CARD_MAX_ROWS, defaultCardMaxRows, 1, 12)
+    for (const [index, row] of rows.slice(0, maxRows).entries()) {
       elements.push({
         tag: 'markdown',
         content: runCardRow(row, index + 1),
+      })
+    }
+    if (rows.length > maxRows) {
+      elements.push({
+        tag: 'markdown',
+        content: `还有 ${rows.length - maxRows} 条没有放进群卡片，完整结果请看 Markdown 报告或飞书多维表格。`,
       })
     }
   }
@@ -634,6 +767,13 @@ async function notifyRun(kind, result) {
   }
 }
 
+async function finalizeRun(kind, result) {
+  const envValues = await readLocalEnvValues()
+  const baseSync = await syncRunToFeishuBase(kind, result, envValues)
+  const enriched = { ...result, baseSync }
+  return { ...enriched, notification: await notifyRun(kind, enriched) }
+}
+
 async function settingsStatus(config = null) {
   const envValues = await readLocalEnvValues()
   const cfg = config || await readJson(configPath, {})
@@ -680,6 +820,10 @@ async function settingsStatus(config = null) {
       monitorDir,
     },
     parserConfig,
+    feishuBase: {
+      configured: feishuBaseSettings(envValues).configured,
+      baseUrl: feishuBaseSettings(envValues).baseUrl,
+    },
   }
 }
 
@@ -925,7 +1069,7 @@ app.post('/api/run/account', async (req, res) => {
   if (body.transcribe) args.push('--transcribe')
   try {
     const result = await runMonitorWithRows(args)
-    res.json({ ...result, notification: await notifyRun('account', result) })
+    res.json(await finalizeRun('account', result))
   } finally {
     await fs.rm(runConfigPath, { force: true })
   }
@@ -980,7 +1124,7 @@ app.post('/api/run/lowfan', async (req, res) => {
   ]
   if (body.fallbackRoute !== false) args.push('--fallback-route')
   const result = await runMonitorWithRows(args)
-  res.json({ ...result, notification: await notifyRun('lowfan', result) })
+  res.json(await finalizeRun('lowfan', result))
 })
 
 app.post('/api/settings/douyin-session', async (req, res) => {
