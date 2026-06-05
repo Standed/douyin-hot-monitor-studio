@@ -9,7 +9,8 @@
     "accounts": [
       {
         "name": "example account",
-        "sec_user_id": "replace_with_douyin_sec_user_id"
+        "sec_user_id": "replace_with_douyin_sec_user_id",
+        "enabled": true
       }
     ]
   },

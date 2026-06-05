@@ -16,6 +16,11 @@ let douyinWebConfigPath = ''
 const app = express()
 const port = 8787
 const host = process.env.HOST || '127.0.0.1'
+const feedbackDefaults = {
+  formUrl: 'https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38?table=tbluyxSuTJzzm4tw&view=vewSjYQe24',
+  baseUrl: 'https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38',
+  formId: 'vewSjYQe24',
+}
 
 const defaultLowFanConfig = {
   fans_num: 10000,
@@ -178,7 +183,12 @@ function summarizeAccounts(config) {
     index: index + 1,
     name: account.name,
     secUserId: account.sec_user_id,
+    enabled: account.enabled !== false,
   }))
+}
+
+function enabledAccounts(config) {
+  return (config.account_monitor?.accounts || []).filter((account) => account.enabled !== false)
 }
 
 function asPositiveNumber(value, fallback) {
@@ -215,7 +225,7 @@ function normalizeAccountMonitorConfig(value = {}, current = {}) {
     if (!name || !secUserId) {
       return { error: '账号名称和 sec_user_id 都要填写；空白行可以直接留空。' }
     }
-    accounts.push({ name, sec_user_id: secUserId })
+    accounts.push({ name, sec_user_id: secUserId, enabled: account?.enabled !== false })
   }
 
   return {
@@ -342,6 +352,46 @@ function normalizeProvider(value) {
   return ['lemonfox', 'faster-whisper', 'whisper'].includes(provider) ? provider : 'faster-whisper'
 }
 
+function feedbackSettings(envValues = {}) {
+  const webhook = process.env.FEISHU_FEEDBACK_WEBHOOK || envValues.FEISHU_FEEDBACK_WEBHOOK || ''
+  return {
+    formUrl: process.env.FEISHU_FEEDBACK_FORM_URL || envValues.FEISHU_FEEDBACK_FORM_URL || feedbackDefaults.formUrl,
+    baseUrl: process.env.FEISHU_FEEDBACK_BASE_URL || envValues.FEISHU_FEEDBACK_BASE_URL || feedbackDefaults.baseUrl,
+    formId: process.env.FEISHU_FEEDBACK_FORM_ID || envValues.FEISHU_FEEDBACK_FORM_ID || feedbackDefaults.formId,
+    webhookConfigured: Boolean(webhook),
+  }
+}
+
+function sanitizeFeedbackText(value, maxLength) {
+  return String(value || '').trim().slice(0, maxLength)
+}
+
+async function sendFeedbackNotification(feedback, webhook) {
+  if (!webhook) return { configured: false, sent: false }
+  const settings = feedbackSettings()
+  const response = await fetch(webhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      msg_type: 'text',
+      content: {
+        text: [
+          'DY HOT 收到新反馈',
+          `页面：${feedback.page || '未填写'}`,
+          `联系方式：${feedback.contact || '未填写'}`,
+          `内容：${feedback.message}`,
+          `问卷：${settings.formUrl}`,
+          `时间：${feedback.createdAt}`,
+        ].join('\n'),
+      },
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(`Feishu webhook HTTP ${response.status}`)
+  }
+  return { configured: true, sent: true }
+}
+
 async function settingsStatus(config = null) {
   const envValues = await readLocalEnvValues()
   const cfg = config || await readJson(configPath, {})
@@ -393,6 +443,7 @@ async function settingsStatus(config = null) {
 
 app.get('/api/dashboard', async (_req, res) => {
   const config = await readJson(configPath, {})
+  const envValues = await readLocalEnvValues()
   const lowFanConfig = normalizeLowFanConfig(config.low_fan_hits)
   const outputDir = path.resolve(monitorDir, config.output_dir || '../../douyin-monitor-output')
   const reports = await listReports(outputDir)
@@ -403,6 +454,7 @@ app.get('/api/dashboard', async (_req, res) => {
     service,
     config: {
       accountCount: config.account_monitor?.accounts?.length || 0,
+      enabledAccountCount: enabledAccounts(config).length,
       accounts: summarizeAccounts(config),
       countPerAccount: config.account_monitor?.count_per_account || 2,
       downloadVideo: Boolean(config.account_monitor?.download_video),
@@ -428,6 +480,7 @@ app.get('/api/dashboard', async (_req, res) => {
     latestRows: await latestRows(reports),
     latestLowfanRows: await latestRowsByPrefix(reports, 'lowfan_'),
     latestAccountRows: await latestRowsByPrefix(reports, 'account_new'),
+    feedback: feedbackSettings(envValues),
     state,
   })
 })
@@ -551,6 +604,7 @@ app.post('/api/settings/accounts', async (req, res) => {
     ok: true,
     accountMonitor: {
       accountCount: config.account_monitor.accounts.length,
+      enabledAccountCount: enabledAccounts(config).length,
       accounts: summarizeAccounts(config),
       countPerAccount: config.account_monitor.count_per_account,
       downloadVideo: config.account_monitor.download_video,
@@ -561,7 +615,25 @@ app.post('/api/settings/accounts', async (req, res) => {
 
 app.post('/api/run/account', async (req, res) => {
   const body = req.body || {}
+  const config = await readJson(configPath, {})
+  const accounts = enabledAccounts(config)
+  if (!accounts.length) {
+    res.status(400).json({ ok: false, command: 'account-run', code: 1, stdout: '', stderr: '没有启用的对标账号' })
+    return
+  }
+
+  const runConfig = {
+    ...config,
+    account_monitor: {
+      ...(config.account_monitor || {}),
+      accounts,
+    },
+  }
+  const runConfigPath = path.join(monitorDir, '.tmp-account-run.config.json')
+  await saveJson(runConfigPath, runConfig)
   const args = [
+    '--config',
+    runConfigPath,
     'account-run',
     '--limit',
     String(asPositiveNumber(body.limit, 2)),
@@ -574,7 +646,38 @@ app.post('/api/run/account', async (req, res) => {
   if (body.includeSeen) args.push('--include-seen')
   if (body.download) args.push('--download')
   if (body.transcribe) args.push('--transcribe')
-  res.json(await runMonitorWithRows(args))
+  try {
+    res.json(await runMonitorWithRows(args))
+  } finally {
+    await fs.rm(runConfigPath, { force: true })
+  }
+})
+
+app.post('/api/feedback', async (req, res) => {
+  const envValues = await readLocalEnvValues()
+  const webhook = process.env.FEISHU_FEEDBACK_WEBHOOK || envValues.FEISHU_FEEDBACK_WEBHOOK || ''
+  const feedback = {
+    message: sanitizeFeedbackText(req.body?.message, 2000),
+    contact: sanitizeFeedbackText(req.body?.contact, 200),
+    page: sanitizeFeedbackText(req.body?.page, 100),
+    createdAt: new Date().toISOString(),
+  }
+  if (!feedback.message) {
+    res.status(400).json({ ok: false, webhookConfigured: Boolean(webhook), error: '反馈内容不能为空' })
+    return
+  }
+
+  try {
+    const notification = await sendFeedbackNotification(feedback, webhook)
+    res.json({ ok: true, ...notification, ...feedbackSettings(envValues) })
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      webhookConfigured: Boolean(webhook),
+      error: error instanceof Error ? error.message : String(error),
+      ...feedbackSettings(envValues),
+    })
+  }
 })
 
 app.post('/api/run/lowfan', async (req, res) => {

@@ -294,7 +294,7 @@ def account_run(
     new_rows: list[dict[str, Any]] = []
     errors: list[dict[str, str]] = []
 
-    accounts = account_cfg["accounts"]
+    accounts = [account for account in account_cfg["accounts"] if account.get("enabled", True)]
     if max_accounts:
         accounts = accounts[:max_accounts]
 

@@ -6,19 +6,19 @@ import {
   ChartNoAxesColumnIncreasing,
   CheckCircle2,
   Clock3,
-  Command,
+  Computer,
   Download,
   ExternalLink,
   FileText,
   Gauge,
   Heart,
   History,
-  Info,
   KeyRound,
   LayoutList,
   Loader2,
   LogIn,
   Moon,
+  MessageSquareText,
   Play,
   Plus,
   RefreshCw,
@@ -30,6 +30,8 @@ import {
   Server,
   Sun,
   Trash2,
+  ArrowDown,
+  ArrowUp,
   Users,
   Video,
   Zap,
@@ -54,12 +56,14 @@ type AccountSummary = {
   index: number
   name: string
   secUserId: string
+  enabled: boolean
 }
 
 type AccountDraft = {
   id: string
   name: string
   secUserId: string
+  enabled: boolean
 }
 
 type IntegrationState = {
@@ -104,10 +108,11 @@ type ThresholdSettings = {
   defaultLowFan: ConfigSummary['defaultLowFan']
 }
 
-type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | null
+type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | 'feedback' | null
 
 type ConfigSummary = {
   accountCount: number
+  enabledAccountCount: number
   accounts: AccountSummary[]
   countPerAccount: number
   downloadVideo: boolean
@@ -172,6 +177,7 @@ type ReportRow = {
 type DashboardData = {
   service: ServiceStatus
   config: ConfigSummary
+  feedback: FeedbackSettings
   reports: ReportFile[]
   latestRows: ReportRow[]
   latestLowfanRows: ReportRow[]
@@ -189,6 +195,26 @@ type RunResult = {
   rows?: ReportRow[]
 }
 
+type FeedbackSettings = {
+  formUrl: string
+  baseUrl: string
+  formId: string
+  webhookConfigured: boolean
+}
+
+type FeedbackState = {
+  message: string
+  contact: string
+  page: string
+}
+
+const feedbackDefaults: FeedbackSettings = {
+  formUrl: 'https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38?table=tbluyxSuTJzzm4tw&view=vewSjYQe24',
+  baseUrl: 'https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38',
+  formId: 'vewSjYQe24',
+  webhookConfigured: false,
+}
+
 const defaultData: DashboardData = {
   service: {
     ok: false,
@@ -197,6 +223,7 @@ const defaultData: DashboardData = {
   },
   config: {
     accountCount: 0,
+    enabledAccountCount: 0,
     accounts: [],
     countPerAccount: 2,
     downloadVideo: false,
@@ -245,6 +272,7 @@ const defaultData: DashboardData = {
       },
     },
   },
+  feedback: feedbackDefaults,
   reports: [],
   latestRows: [],
   latestLowfanRows: [],
@@ -261,9 +289,9 @@ const providerOptions = [
   { label: 'Lemonfox 云端', value: 'lemonfox' },
 ]
 
-type PageId = 'overview' | 'lowfan' | 'accounts' | 'settings' | 'reports' | 'ops' | 'about'
+type PageId = 'overview' | 'lowfan' | 'accounts' | 'settings' | 'reports' | 'ops' | 'about' | 'feedback'
 
-const pageIds: PageId[] = ['overview', 'lowfan', 'accounts', 'settings', 'reports', 'ops', 'about']
+const pageIds: PageId[] = ['overview', 'lowfan', 'accounts', 'settings', 'reports', 'ops', 'about', 'feedback']
 
 const navItems: Array<{ id: PageId; icon: IconComponent; label: string; desc: string }> = [
   { id: 'overview', icon: Zap, label: '精选总览', desc: '素材流和运行状态' },
@@ -273,6 +301,7 @@ const navItems: Array<{ id: PageId; icon: IconComponent; label: string; desc: st
   { id: 'reports', icon: FileText, label: '归档报告', desc: 'JSON / CSV / MD' },
   { id: 'ops', icon: ShieldCheck, label: '运行诊断', desc: '服务和错误' },
   { id: 'about', icon: Heart, label: '使用说明', desc: '用途和替代方案' },
+  { id: 'feedback', icon: MessageSquareText, label: '反馈', desc: '建议和问题' },
 ]
 
 const pageCopy: Record<PageId, { title: string; eyebrow: string; description: string }> = {
@@ -289,7 +318,7 @@ const pageCopy: Record<PageId, { title: string; eyebrow: string; description: st
   accounts: {
     title: '对标账号监控',
     eyebrow: 'Benchmark Watch',
-    description: '按配置里的 sec_user_id 抓取对标账号最新作品，适合固定账号池的日常巡检。',
+    description: '按监控账号的用户 ID 抓取对标账号最新作品，适合固定账号池的日常巡检。',
   },
   settings: {
     title: '接口与转写配置',
@@ -310,6 +339,11 @@ const pageCopy: Record<PageId, { title: string; eyebrow: string; description: st
     title: '使用说明',
     eyebrow: 'Playbook',
     description: '说明 TikHub、Lemonfox 分别做什么，以及没有它们时可以怎么替代。',
+  },
+  feedback: {
+    title: '说说你的想法',
+    eyebrow: 'Feedback',
+    description: '发现 bug、想要的功能、看不顺眼的地方都可以告诉我，提交后会通知到飞书群。',
   },
 }
 
@@ -334,7 +368,16 @@ const learningCards = [
   },
 ]
 
-type ThemeMode = 'dark' | 'light'
+type ThemeMode = 'dark' | 'system' | 'light'
+
+function getSystemTheme() {
+  if (typeof window === 'undefined') return 'dark'
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+}
+
+function resolveTheme(theme: ThemeMode) {
+  return theme === 'system' ? getSystemTheme() : theme
+}
 
 function getInitialPage(): PageId {
   if (typeof window === 'undefined') return 'overview'
@@ -421,6 +464,7 @@ function accountsToDrafts(accounts: AccountSummary[]): AccountDraft[] {
     id: `${account.index}-${account.secUserId || account.name}`,
     name: account.name || '',
     secUserId: account.secUserId || '',
+    enabled: account.enabled !== false,
   }))
 }
 
@@ -429,6 +473,7 @@ function createEmptyAccountDraft(): AccountDraft {
     id: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     name: '',
     secUserId: '',
+    enabled: true,
   }
 }
 
@@ -491,9 +536,11 @@ function App() {
   const [activePage, setActivePage] = useState<PageId>(getInitialPage)
   const [resultMode, setResultMode] = useState<'latest' | 'lowfan' | 'account'>('latest')
   const [theme, setTheme] = useState<ThemeMode>(() => {
-    if (typeof window === 'undefined') return 'dark'
-    return window.localStorage.getItem('douyin-monitor-theme') === 'light' ? 'light' : 'dark'
+    if (typeof window === 'undefined') return 'system'
+    const saved = window.localStorage.getItem('douyin-monitor-theme')
+    return saved === 'dark' || saved === 'light' || saved === 'system' ? saved : 'system'
   })
+  const [feedbackDraft, setFeedbackDraft] = useState<FeedbackState>({ message: '', contact: '', page: '' })
 
   const latestReport = data.reports[0]
   const integrations = normalizeIntegrations(data.config)
@@ -768,7 +815,7 @@ function App() {
     try {
       const result = await api<{
         ok: boolean
-        accountMonitor: Pick<ConfigSummary, 'accountCount' | 'accounts' | 'countPerAccount' | 'downloadVideo' | 'transcribe'>
+        accountMonitor: Pick<ConfigSummary, 'accountCount' | 'enabledAccountCount' | 'accounts' | 'countPerAccount' | 'downloadVideo' | 'transcribe'>
         error?: string
       }>('/api/settings/accounts', {
         method: 'POST',
@@ -804,6 +851,39 @@ function App() {
     }
   }
 
+  async function submitFeedback() {
+    if (!feedbackDraft.message.trim()) return
+    setRunning('feedback')
+    try {
+      const result = await api<{ ok: boolean; webhookConfigured: boolean; error?: string }>('/api/feedback', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...feedbackDraft,
+          page: feedbackDraft.page || currentPage.title,
+        }),
+      })
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/feedback',
+        code: result.ok ? 0 : 1,
+        stdout: result.webhookConfigured ? '反馈已发送到飞书群' : '反馈已记录；飞书群机器人未配置',
+        stderr: result.error || '',
+      })
+      if (result.ok) setFeedbackDraft({ message: '', contact: '', page: '' })
+      setData((current) => ({
+        ...current,
+        feedback: {
+          ...(current.feedback || feedbackDefaults),
+          webhookConfigured: result.webhookConfigured,
+        },
+      }))
+    } catch (error) {
+      setLastRun(createRunError('POST /api/feedback', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -830,8 +910,20 @@ function App() {
   }, [])
 
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
+    document.documentElement.dataset.theme = resolveTheme(theme)
+    document.documentElement.dataset.themeMode = theme
     window.localStorage.setItem('douyin-monitor-theme', theme)
+  }, [theme])
+
+  useEffect(() => {
+    if (theme !== 'system') return
+    const query = window.matchMedia('(prefers-color-scheme: light)')
+    const updateTheme = () => {
+      document.documentElement.dataset.theme = resolveTheme('system')
+    }
+    updateTheme()
+    query.addEventListener('change', updateTheme)
+    return () => query.removeEventListener('change', updateTheme)
   }, [theme])
 
   useEffect(() => {
@@ -871,7 +963,9 @@ function App() {
             <button className={theme === 'dark' ? 'theme-button active' : 'theme-button'} onClick={() => setTheme('dark')} title="夜间模式">
               <Moon className="size-4" />
             </button>
-            <Command className="size-4" />
+            <button className={theme === 'system' ? 'theme-button active' : 'theme-button'} onClick={() => setTheme('system')} title="跟随系统">
+              <Computer className="size-4" />
+            </button>
             <button className={theme === 'light' ? 'theme-button active' : 'theme-button'} onClick={() => setTheme('light')} title="浅色模式">
               <Sun className="size-4" />
             </button>
@@ -919,21 +1013,19 @@ function App() {
         </header>
 
         <section className="ops-strip">
-          <StatusPill icon={Users} label="监控账号" value={`${data.config.accountCount} 个`} />
+          <StatusPill icon={Users} label="监控账号" value={`${data.config.enabledAccountCount} / ${data.config.accountCount} 个`} />
           <StatusPill icon={Gauge} label="粉丝阈值" value={`≤ ${formatNumber(data.config.thresholds.fans_num)}`} />
           <StatusPill
             icon={Sparkles}
             label="TikHub"
             value={data.config.hasTikhubKey ? '已接入' : '未配置'}
             tone={data.config.hasTikhubKey ? 'good' : 'warn'}
-            tooltip="用于抖音搜索和作品数据。不是长期无限免费，通常有试用额度后按请求或套餐计费，以 TikHub 官网为准。"
           />
           <StatusPill
             icon={Captions}
             label="转写"
             value={formatProvider(activeTranscription.provider)}
             tone={providerStatus.available ? 'good' : 'warn'}
-            tooltip="Lemonfox 是云端转写，通常消耗付费额度；faster-whisper / Whisper 是本地模型，框架免费但会消耗本机算力和模型存储。"
           />
           <div className="run-actions">
             <Button variant="secondary" onClick={runAccount} disabled={running !== null}>
@@ -951,7 +1043,7 @@ function App() {
           <>
             <section className="summary-grid">
               <FeatureTile icon={Search} title="低粉爆款" value={resultMode === 'lowfan' ? `${displayRows.length} 条命中` : '关键词发现'} onClick={() => navigate('lowfan')} />
-              <FeatureTile icon={LayoutList} title="对标账号" value={`${data.config.accountCount} 个账号`} onClick={() => navigate('accounts')} />
+              <FeatureTile icon={LayoutList} title="对标账号" value={`${data.config.enabledAccountCount} 个启用`} onClick={() => navigate('accounts')} />
               <FeatureTile icon={Settings2} title="接口配置" value={data.config.hasTikhubKey && data.config.hasLemonfoxKey ? '关键接口已接入' : '有接口待配置'} onClick={() => navigate('settings')} />
             </section>
             <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} />
@@ -1071,6 +1163,15 @@ function App() {
         {activePage === 'reports' && <ReportsPage reports={data.reports} />}
         {activePage === 'ops' && <OpsPage data={data} lastErrors={lastErrors} lastRun={lastRun} parsedRun={parsedRun} providerStatus={providerStatus} />}
         {activePage === 'about' && <AboutPage />}
+        {activePage === 'feedback' && (
+          <FeedbackPage
+            feedback={feedbackDraft}
+            running={running}
+            setFeedback={setFeedbackDraft}
+            settings={data.feedback || feedbackDefaults}
+            submitFeedback={submitFeedback}
+          />
+        )}
       </section>
     </main>
   )
@@ -1234,6 +1335,16 @@ function AccountPanel({
     setAccountDrafts(next.length ? next : [createEmptyAccountDraft()])
   }
 
+  function moveAccount(id: string, direction: -1 | 1) {
+    const index = accountDrafts.findIndex((account) => account.id === id)
+    const nextIndex = index + direction
+    if (index < 0 || nextIndex < 0 || nextIndex >= accountDrafts.length) return
+    const next = [...accountDrafts]
+    const [item] = next.splice(index, 1)
+    next.splice(nextIndex, 0, item)
+    setAccountDrafts(next)
+  }
+
   return (
     <Card className="control-card account-card page-card">
       <CardContent>
@@ -1264,24 +1375,38 @@ function AccountPanel({
         </div>
         <div className="account-editor">
           <div className="account-editor-head">
+            <span>状态</span>
             <span>账号名称</span>
-            <span>sec_user_id</span>
+            <span>用户 ID</span>
             <span>操作</span>
           </div>
           {accountDrafts.length ? (
-            accountDrafts.map((account) => (
-              <div className="account-editor-row" key={account.id}>
+            accountDrafts.map((account, index) => (
+              <div className={account.enabled === false ? 'account-editor-row disabled' : 'account-editor-row'} key={account.id}>
+                <label className="account-enabled">
+                  <input type="checkbox" checked={account.enabled !== false} onChange={(event) => updateAccount(account.id, { enabled: event.target.checked })} />
+                  <span>{account.enabled === false ? '停用' : '启用'}</span>
+                </label>
                 <Input value={account.name} onChange={(event) => updateAccount(account.id, { name: event.target.value })} placeholder="例如：AIGC自修室" />
-                <Input value={account.secUserId} onChange={(event) => updateAccount(account.id, { secUserId: event.target.value })} placeholder="MS4wLjAB..." />
-                <Button variant="ghost" size="icon" onClick={() => removeAccount(account.id)} title="删除账号">
-                  <Trash2 className="size-4" />
-                </Button>
+                <Input value={account.secUserId} onChange={(event) => updateAccount(account.id, { secUserId: event.target.value })} placeholder="例如：MS4wLjABAAAAX7P5NK7HVXt5dPUWL9qoxKqMcHaLM7rkqxQqEK2C7vrgLUJ3c_4wr8H4cTk3ThnN" />
+                <div className="account-row-actions">
+                  <Button variant="ghost" size="icon" onClick={() => moveAccount(account.id, -1)} disabled={index === 0} title="上移">
+                    <ArrowUp className="size-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => moveAccount(account.id, 1)} disabled={index === accountDrafts.length - 1} title="下移">
+                    <ArrowDown className="size-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => removeAccount(account.id)} title="删除账号">
+                    <Trash2 className="size-4" />
+                  </Button>
+                </div>
               </div>
             ))
           ) : (
             <div className="account-empty">还没有对标账号，先添加一行。</div>
           )}
         </div>
+        <p className="panel-hint">用户 ID 是监控账号抖音主页网址里 /user/ 后、? 前的那一段，例如 https://www.douyin.com/user/MS4wLjAB...?from_tab_name=main 中的 MS4wLjAB...。</p>
         <div className="account-actions">
           <Button variant="ghost" onClick={() => setAccountDrafts([...accountDrafts, createEmptyAccountDraft()])}>
             <Plus className="size-4" />
@@ -1295,7 +1420,7 @@ function AccountPanel({
         <div className="account-list">
           {visibleAccounts.length ? (
             visibleAccounts.map((account) => (
-              <span className="account-chip" key={account.secUserId}>
+              <span className={account.enabled === false ? 'account-chip muted' : 'account-chip'} key={account.secUserId}>
                 <b>{String(account.index).padStart(2, '0')}</b>
                 {account.name}
               </span>
@@ -1593,9 +1718,9 @@ function LearningGrid() {
           <CardContent>
             <strong>
               {card.title}
-              <InfoTooltip text={card.cost} />
             </strong>
             <p>{card.body}</p>
+            <em className="cost-note">{card.cost}</em>
             <span>{card.alternatives}</span>
           </CardContent>
         </Card>
@@ -1789,6 +1914,61 @@ function AboutPage() {
   )
 }
 
+function FeedbackPage({
+  feedback,
+  running,
+  setFeedback,
+  settings,
+  submitFeedback,
+}: {
+  feedback: FeedbackState
+  running: RunningAction
+  setFeedback: (value: FeedbackState) => void
+  settings: FeedbackSettings
+  submitFeedback: () => void
+}) {
+  return (
+    <section className="feedback-page">
+      <Card className="feedback-card">
+        <CardContent>
+          <PanelTitle icon={MessageSquareText} title="反馈" />
+          <p className="panel-copy">发现 bug、想要的功能、看不顺眼的地方，都可以直接写。提交后会通知飞书群；也可以打开公司飞书问卷补充更完整的信息。</p>
+          <Field label="想说点什么？">
+            <textarea
+              className="textarea-control feedback-textarea"
+              value={feedback.message}
+              onChange={(event) => setFeedback({ ...feedback, message: event.target.value })}
+              maxLength={2000}
+              placeholder="比如：对标账号这里希望能批量导入；接口配置页某个说明看不懂；某个按钮位置不顺手。"
+              rows={8}
+            />
+          </Field>
+          <div className="feedback-count">{feedback.message.length} / 2000</div>
+          <div className="form-grid">
+            <Field label="联系方式（选填）">
+              <Input value={feedback.contact} onChange={(event) => setFeedback({ ...feedback, contact: event.target.value })} placeholder="邮箱 / 微信 / 手机号 / 飞书名" />
+            </Field>
+            <Field label="页面位置（选填）">
+              <Input value={feedback.page} onChange={(event) => setFeedback({ ...feedback, page: event.target.value })} placeholder="例如：对标账号 / 接口配置" />
+            </Field>
+          </div>
+          <div className="feedback-actions">
+            <Button onClick={submitFeedback} disabled={running !== null || !feedback.message.trim()}>
+              {running === 'feedback' ? <Loader2 className="size-4 animate-spin" /> : <MessageSquareText className="size-4" />}
+              发送反馈
+            </Button>
+            <a className="feedback-link" href={settings.formUrl || settings.baseUrl} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+              打开飞书问卷
+            </a>
+          </div>
+          <p className="panel-hint">{settings.webhookConfigured ? '飞书群机器人已配置，页面内提交会同步通知。' : '当前环境没有配置 FEISHU_FEEDBACK_WEBHOOK，页面会保留反馈结果提示；部署时配置环境变量即可通知飞书群。'}</p>
+        </CardContent>
+      </Card>
+    </section>
+  )
+}
+
 function PanelTitle({ icon: Icon, title }: { icon: IconComponent; title: string }) {
   return (
     <div className="panel-title">
@@ -1801,21 +1981,10 @@ function PanelTitle({ icon: Icon, title }: { icon: IconComponent; title: string 
 function Field({ label, children, help }: { label: string; children: ReactNode; help?: string }) {
   return (
     <label className="field">
-      <span>
-        {label}
-        {help && <InfoTooltip text={help} />}
-      </span>
+      <span>{label}</span>
       {children}
+      {help && <small className="field-help">{help}</small>}
     </label>
-  )
-}
-
-function InfoTooltip({ text }: { text: string }) {
-  return (
-    <span className="info-tooltip" tabIndex={0} aria-label={text}>
-      <Info className="size-3.5" />
-      <i>{text}</i>
-    </span>
   )
 }
 
@@ -1874,20 +2043,17 @@ function StatusPill({
   label,
   value,
   tone = 'default',
-  tooltip,
 }: {
   icon: IconComponent
   label: string
   value: string
   tone?: 'default' | 'good' | 'warn'
-  tooltip?: string
 }) {
   return (
     <div className={`status-pill ${tone}`}>
       <Icon className="size-4" />
       <span>{label}</span>
       <strong>{value}</strong>
-      {tooltip && <InfoTooltip text={tooltip} />}
     </div>
   )
 }
