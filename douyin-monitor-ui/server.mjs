@@ -616,7 +616,30 @@ app.post('/api/settings/accounts', async (req, res) => {
 app.post('/api/run/account', async (req, res) => {
   const body = req.body || {}
   const config = await readJson(configPath, {})
-  const accounts = enabledAccounts(config)
+  const current = config.account_monitor || {}
+  let accountMonitor = current
+
+  if (Array.isArray(body.accounts)) {
+    const next = normalizeAccountMonitorConfig(
+      {
+        accounts: body.accounts,
+        countPerAccount: body.limit,
+        downloadVideo: body.download,
+        transcribe: body.transcribe,
+      },
+      current,
+    )
+    if (next.error) {
+      res.status(400).json({ ok: false, command: 'account-run', code: 1, stdout: '', stderr: next.error })
+      return
+    }
+    accountMonitor = {
+      ...current,
+      ...next,
+    }
+  }
+
+  const accounts = (accountMonitor.accounts || []).filter((account) => account.enabled !== false)
   if (!accounts.length) {
     res.status(400).json({ ok: false, command: 'account-run', code: 1, stdout: '', stderr: '没有启用的对标账号' })
     return
@@ -625,7 +648,7 @@ app.post('/api/run/account', async (req, res) => {
   const runConfig = {
     ...config,
     account_monitor: {
-      ...(config.account_monitor || {}),
+      ...accountMonitor,
       accounts,
     },
   }
@@ -640,7 +663,7 @@ app.post('/api/run/account', async (req, res) => {
     '--timeout',
     String(asPositiveNumber(body.timeout, 12)),
   ]
-  if (body.maxAccounts !== 'all') {
+  if (body.maxAccounts && body.maxAccounts !== 'all') {
     args.push('--max-accounts', String(asPositiveNumber(body.maxAccounts, 3)))
   }
   if (body.includeSeen) args.push('--include-seen')

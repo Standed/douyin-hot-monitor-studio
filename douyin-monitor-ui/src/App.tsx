@@ -621,6 +621,7 @@ function App() {
         method: 'POST',
         body: JSON.stringify({
           limit,
+          accounts: accountDrafts,
           includeSeen,
           download: downloadVideo,
           transcribe,
@@ -1105,6 +1106,7 @@ function App() {
             <AccountPanel
               downloadVideo={downloadVideo}
               includeSeen={includeSeen}
+              lastRun={lastRun}
               limit={limit}
               running={running}
               setDownloadVideo={setDownloadVideo}
@@ -1313,6 +1315,7 @@ function AccountPanel({
   accountDrafts,
   downloadVideo,
   includeSeen,
+  lastRun,
   limit,
   running,
   saveAccounts,
@@ -1330,6 +1333,7 @@ function AccountPanel({
   accountDrafts: AccountDraft[]
   downloadVideo: boolean
   includeSeen: boolean
+  lastRun?: RunResult
   limit: number
   running: RunningAction
   saveAccounts: () => void
@@ -1352,6 +1356,10 @@ function AccountPanel({
     const next = accountDrafts.filter((account) => account.id !== id)
     setAccountDrafts(next.length ? next : [createEmptyAccountDraft()])
   }
+
+  const enabledDraftCount = accountDrafts.filter((account) => account.enabled !== false && account.name.trim() && account.secUserId.trim()).length
+  const accountRunResult = lastRun?.command.includes('account-run') || lastRun?.command.includes('/api/run/account') ? lastRun : undefined
+  const accountRunMessage = formatAccountRunMessage(accountRunResult, enabledDraftCount)
 
   return (
     <Card className="control-card account-card page-card">
@@ -1422,13 +1430,35 @@ function AccountPanel({
             <span className="account-chip muted">请先在页面添加并保存对标账号</span>
           )}
         </div>
-        <Button className="full-action" variant="secondary" onClick={onRun} disabled={running !== null}>
+        <div className={running === 'account' ? 'run-feedback active' : accountRunResult?.ok === false ? 'run-feedback error' : 'run-feedback'}>
+          {running === 'account'
+            ? `正在监控 ${enabledDraftCount} 个启用账号，完成后右侧结果和归档报告会刷新。`
+            : accountRunResult
+              ? accountRunMessage
+              : `将监控 ${enabledDraftCount} 个启用账号。`}
+        </div>
+        <Button className="full-action" variant="secondary" onClick={onRun} disabled={running !== null || enabledDraftCount === 0}>
           {running === 'account' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-          开始监控对标账号
+          {enabledDraftCount ? `开始监控 ${enabledDraftCount} 个启用账号` : '没有启用账号'}
         </Button>
       </CardContent>
     </Card>
   )
+}
+
+function formatAccountRunMessage(result: RunResult | undefined, enabledCount: number) {
+  if (!result) return `将监控 ${enabledCount} 个启用账号。`
+  if (result.ok) return `上次账号监控完成，返回 ${result.rows?.length || 0} 条结果。`
+
+  const errors = Array.isArray(result.parsed?.errors) ? result.parsed.errors : []
+  const firstError = errors[0]
+  if (firstError && typeof firstError === 'object') {
+    const account = String((firstError as Record<string, unknown>).account || '账号')
+    const error = String((firstError as Record<string, unknown>).error || '运行失败')
+    return `${account}：${error}`
+  }
+
+  return result.stderr || '账号监控失败，请查看运行诊断。'
 }
 
 function SessionPanel({
