@@ -13,14 +13,26 @@ README.md              用户安装、配置、费用和私有化说明
 
 `Douyin_TikTok_Download_API` 兼容容器是本项目 Compose 启动链路里的内置解析服务能力；旁边完整的 `../Douyin_TikTok_Download_API` 只作为 Cookie、代理和高级部署管理入口。本项目不要把它的代码复制进来；只通过 `LOCAL_API_BASE` 连接兼容接口。
 
+默认 Compose 服务名是 `douyin-parser`，宿主机健康检查地址是 `http://127.0.0.1:8091/openapi.json`，UI 容器内部地址是 `http://douyin-parser`。本地 `npm run dev` 不会自动启动解析服务；开发前要确认 8091 端口已经由兼容的 `Douyin_TikTok_Download_API` 服务占用。
+
 ## 配置原则
 
 - 页面只暴露用户必须配置或必须决策的内容。
 - 不要把默认可工作的参数堆在主表单里；模型、设备、compute type、prompt、脚本目录等放到高级设置。
 - 低粉爆款搜索需要 `TIKHUB_API_KEY`。
+- `TIKHUB_API_KEY` 按完整 Authorization 值读取，推荐文档示例写 `Bearer your_tikhub_token`。不要在代码、README、截图、fixture、报告或提交记录里写真实 key。
 - 云端转写需要 `LEMONFOX_API_KEY`。
+- `LEMONFOX_API_KEY` 同样只能来自 `.env.local`、服务器环境变量或部署 secret。
 - 本地转写优先推荐 `faster-whisper`，已有 Whisper 环境时再用 `openai-whisper`。
 - 对标账号监控、下载、本地转写依赖本地解析服务，默认 `http://127.0.0.1:8091`。
+- 需要改 Cookie、代理或高级解析服务配置时，优先改完整 `Douyin_TikTok_Download_API` 部署或挂载它的配置文件，不要把上游项目源码搬进本仓库。
+
+## 本地启动规则
+
+- 启动前先查 `git remote -v`，确认当前仓库是 `Standed/douyin-hot-monitor-studio`。
+- 启动前先查 5174、8787、8091 端口；只关闭冲突的旧 dev server 或旧解析服务，不要关闭 Docker Desktop、Chrome bridge、系统服务或无关长期任务。
+- 用 Compose 启动时优先运行 `docker compose up -d --build`，它会同时启动 UI/API 和内置 `Douyin_TikTok_Download_API` 兼容容器。
+- 用本地开发模式启动时运行 `cd douyin-monitor-ui && npm run dev`，并单独保证 `LOCAL_API_BASE` 指向一个可用解析服务。
 
 ## 费用口径
 

@@ -41,13 +41,41 @@ douyin-monitor-ui   React 前端 + Express 控制 API + Python 监控 CLI
 
 ## 最小配置
 
-如果只跑低粉爆款搜索：
+### TikHub API Key
+
+低粉爆款搜索走 TikHub，不走内置解析服务。它必须配置 `TIKHUB_API_KEY`，并且当前 CLI/UI 都按完整 `Authorization` 值读取，推荐写成带 `Bearer ` 前缀的形式：
 
 ```bash
 TIKHUB_API_KEY=Bearer your_tikhub_token
 ```
 
-如果要云端口播转写：
+不要把 `TIKHUB_API_KEY` 写进 README、截图、运行报告或 GitHub issue。只放在本机 `douyin-monitor-ui/.env.local`、服务器环境变量或部署平台 secret 里。
+
+### Douyin_TikTok_Download_API / 本地解析服务
+
+账号监控、无水印下载、登录态检测和部分作品解析依赖 `Douyin_TikTok_Download_API` 兼容接口。项目默认用 `docker-compose.yml` 启动内置容器：
+
+```text
+evil0ctal/douyin_tiktok_download_api:latest -> http://127.0.0.1:8091
+```
+
+本项目不会复制或维护完整的 `Douyin_TikTok_Download_API` 源码。需要高级 Cookie、代理、风控或独立部署时，可以在旁边单独运行完整项目，然后把本项目的 `LOCAL_API_BASE` 指向那个服务。
+
+本地开发默认地址：
+
+```bash
+LOCAL_API_BASE=http://127.0.0.1:8091
+```
+
+Docker Compose 启动时会自动覆盖为容器内地址：
+
+```bash
+LOCAL_API_BASE=http://douyin-parser
+```
+
+### 转写 API Key
+
+如果要云端口播转写，再配置 Lemonfox：
 
 ```bash
 LEMONFOX_API_KEY=your_lemonfox_token
@@ -59,18 +87,6 @@ TRANSCRIPTION_PROVIDER=lemonfox
 ```bash
 TRANSCRIPTION_PROVIDER=faster-whisper
 # 或 TRANSCRIPTION_PROVIDER=whisper
-```
-
-本地解析服务默认地址：
-
-```bash
-LOCAL_API_BASE=http://127.0.0.1:8091
-```
-
-Docker Compose 启动时会覆盖为：
-
-```bash
-LOCAL_API_BASE=http://douyin-parser
 ```
 
 ## 推荐启动方式
