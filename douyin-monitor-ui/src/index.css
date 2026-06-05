@@ -1039,6 +1039,41 @@ a {
   margin-top: 14px;
 }
 
+.route-guide {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px;
+  color: #90a4bb;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 10px;
+  line-height: 1.55;
+}
+
+.route-guide div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.route-guide strong {
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.route-guide span,
+.route-guide em {
+  font-size: clamp(12px, 0.72vw, 13px);
+}
+
+.route-guide em {
+  color: var(--accent-2);
+  font-style: normal;
+  font-weight: 800;
+}
+
 .threshold-row span,
 .account-chip {
   display: inline-flex;

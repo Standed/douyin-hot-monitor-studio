@@ -281,6 +281,7 @@ def account_run(
     timeout: int = 35,
 ) -> int:
     base = os.environ.get("LOCAL_API_BASE", config["local_api_base"]).rstrip("/")
+    tikhub_key = os.environ.get("TIKHUB_API_KEY", "").strip()
     account_cfg = config["account_monitor"]
     output_dir = resolve_path(config["output_dir"])
     state_path = resolve_path(config["state_path"])
@@ -301,13 +302,24 @@ def account_run(
     for account in accounts:
         params = urllib.parse.urlencode({"sec_user_id": account["sec_user_id"], "max_cursor": 0, "count": count})
         url = f"{base}/api/douyin/web/fetch_user_post_videos?{params}"
+        source_api = "local-parser"
         try:
             payload = request_json(url, timeout=timeout)
         except Exception as exc:
-            errors.append({"account": account["name"], "error": str(exc)})
-            continue
+            local_error = str(exc)
+            if not tikhub_key:
+                errors.append({"account": account["name"], "error": local_error})
+                continue
+            tikhub_url = f"https://api.tikhub.io/api/v1/douyin/web/fetch_user_post_videos?{params}"
+            try:
+                payload = request_json(tikhub_url, headers={"Authorization": bearer(tikhub_key)}, timeout=timeout)
+                source_api = "tikhub-fallback"
+            except Exception as fallback_exc:
+                errors.append({"account": account["name"], "error": f"local-parser: {local_error}; tikhub-fallback: {fallback_exc}"})
+                continue
         for item in extract_aweme_list(payload):
             row = normalize_aweme(item, source=account["name"])
+            row["source_api"] = source_api
             if not row["video_id"]:
                 continue
             if row["video_id"] in seen and not include_seen:

@@ -1291,13 +1291,13 @@ function LowfanPanel({
           <Field label="排序方式">
             <Select value={sort} onChange={setSort} options={sortOptions} />
           </Field>
-          <Field label="搜索线路">
+          <Field label="优先线路">
             <Select
               value={route}
               onChange={setRoute}
               options={[
-                { label: '线路一 Web', value: '1' },
-                { label: '线路二 Search', value: '2' },
+                { label: '线路二 Search：关键词搜索，默认推荐', value: '2' },
+                { label: '线路一 Web：网页搜索接口，兜底备用', value: '1' },
               ]}
             />
           </Field>
@@ -1315,12 +1315,32 @@ function LowfanPanel({
           <span>评 ≥ {formatNumber(thresholds.comment)}</span>
           <span>转 ≥ {formatNumber(thresholds.share)}</span>
         </div>
+        <RouteGuide route={route} />
         <Button className="full-action" onClick={onRun} disabled={running !== null || !keyword.trim()}>
           {running === 'lowfan' ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
           开始搜索低粉爆款
         </Button>
       </CardContent>
     </Card>
+  )
+}
+
+function RouteGuide({ route }: { route: string }) {
+  const primary = route === '1'
+    ? '当前优先使用线路一 Web。它走 TikHub 的网页搜索接口，适合线路二搜索异常时备用。'
+    : '当前优先使用线路二 Search。它走 TikHub 的关键词搜索接口，是默认推荐线路。'
+  const fallback = route === '1'
+    ? '运行时会自动兜底到线路二 Search。'
+    : '运行时会自动兜底到线路一 Web。'
+
+  return (
+    <div className="route-guide">
+      <div>
+        <strong>{route === '1' ? '线路一 Web' : '线路二 Search'}</strong>
+        <span>{primary}</span>
+      </div>
+      <em>{fallback}</em>
+    </div>
   )
 }
 
@@ -1596,12 +1616,13 @@ function ThresholdPanel({
               value={route}
               onChange={setRoute}
               options={[
-                { label: '线路二 Search', value: '2' },
-                { label: '线路一 Web', value: '1' },
+                { label: '线路二 Search：默认推荐', value: '2' },
+                { label: '线路一 Web：兜底备用', value: '1' },
               ]}
             />
           </Field>
         </div>
+        <RouteGuide route={route} />
         <Button className="full-action" variant="secondary" onClick={saveThresholds} disabled={running !== null}>
           {running === 'thresholds' ? <Loader2 className="size-4 animate-spin" /> : <Gauge className="size-4" />}
           保存监控阈值
