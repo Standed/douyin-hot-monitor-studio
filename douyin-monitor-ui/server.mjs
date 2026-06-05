@@ -150,6 +150,7 @@ async function listReports(outputDir) {
     reports.push({
       name: entry.name,
       path: fullPath,
+      url: `/api/reports/${encodeURIComponent(entry.name)}`,
       type: ext,
       size: stat.size,
       modifiedAt: stat.mtime.toISOString(),
@@ -165,8 +166,8 @@ async function latestRows(reports) {
   return Array.isArray(rows) ? rows : []
 }
 
-async function latestRowsByPrefix(reports, prefix) {
-  const latestJson = reports.find((report) => report.type === 'json' && report.name.startsWith(prefix))
+async function latestRowsByKind(reports, kind) {
+  const latestJson = reports.find((report) => report.type === 'json' && report.name.includes(`_${kind}`))
   if (!latestJson) return []
   const rows = await readJson(latestJson.path, [])
   return Array.isArray(rows) ? rows : []
@@ -239,7 +240,7 @@ function normalizeAccountMonitorConfig(value = {}, current = {}) {
 function runMonitor(args) {
   return new Promise((resolve) => {
     const command = `${python} ${monitorScript} ${args.join(' ')}`
-    execFile(python, [monitorScript, ...args], { cwd: monitorDir, env: process.env, timeout: 1000 * 90, maxBuffer: 1024 * 1024 * 8 }, (error, stdout, stderr) => {
+    execFile(python, [monitorScript, ...args], { cwd: monitorDir, env: process.env, timeout: 1000 * 300, maxBuffer: 1024 * 1024 * 8 }, (error, stdout, stderr) => {
       resolve({
         ok: !error,
         command,
@@ -278,9 +279,35 @@ async function runMonitorWithRows(args) {
   const jsonPath = parsed?.reports?.json
   return {
     ...result,
-    parsed,
+    stdout: result.ok ? '运行完成' : '',
+    stderr: friendlyMonitorError(result.stderr),
+    parsed: normalizeRunParsed(parsed),
     rows: typeof jsonPath === 'string' ? await reportRows(jsonPath) : [],
   }
+}
+
+function normalizeRunParsed(parsed) {
+  if (!parsed || typeof parsed !== 'object') return parsed
+  const errors = Array.isArray(parsed.errors)
+    ? parsed.errors.map((entry) => ({
+        ...entry,
+        error: friendlyMonitorError(entry?.error || ''),
+      }))
+    : parsed.errors
+  return { ...parsed, errors }
+}
+
+function friendlyMonitorError(value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const lower = text.toLowerCase()
+  if (lower.includes('timed out') || lower.includes('timeout')) {
+    return '抖音接口响应超时。建议稍后重试，或把“请求超时”调到 30-60 秒；如果连续超时，优先检查登录态、代理和解析服务。'
+  }
+  if (lower.includes('cookie') || lower.includes('login') || text.includes('登录')) {
+    return '抖音登录态可能失效。请到“接口配置”检查登录态，或在解析服务里更新 Cookie。'
+  }
+  return text
 }
 
 function parseMonitorOutput(stdout) {
@@ -392,6 +419,50 @@ async function sendFeedbackNotification(feedback, webhook) {
   return { configured: true, sent: true }
 }
 
+async function sendRunNotification(kind, result, webhook) {
+  if (!webhook) return { configured: false, sent: false }
+  const parsed = result.parsed || {}
+  const reports = parsed.reports || {}
+  const errors = Array.isArray(parsed.errors) ? parsed.errors : []
+  const title = kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控'
+  const status = result.ok ? '完成' : '需要处理'
+  const response = await fetch(webhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      msg_type: 'text',
+      content: {
+        text: [
+          `DY HOT ${title}${status}`,
+          `结果：${result.rows?.length || 0} 条`,
+          errors.length ? `提示：${errors.slice(0, 3).map((entry) => `${entry.account || '账号'}：${entry.error || '运行失败'}`).join('；')}` : '',
+          reports.md ? `Markdown：${reports.md}` : '',
+          reports.csv ? `CSV：${reports.csv}` : '',
+          `时间：${new Date().toISOString()}`,
+        ].filter(Boolean).join('\n'),
+      },
+    }),
+  })
+  if (!response.ok) {
+    throw new Error(`Feishu webhook HTTP ${response.status}`)
+  }
+  return { configured: true, sent: true }
+}
+
+async function notifyRun(kind, result) {
+  const envValues = await readLocalEnvValues()
+  const webhook = process.env.FEISHU_RUN_WEBHOOK || envValues.FEISHU_RUN_WEBHOOK || process.env.FEISHU_FEEDBACK_WEBHOOK || envValues.FEISHU_FEEDBACK_WEBHOOK || ''
+  try {
+    return await sendRunNotification(kind, result, webhook)
+  } catch (error) {
+    return {
+      configured: Boolean(webhook),
+      sent: false,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
 async function settingsStatus(config = null) {
   const envValues = await readLocalEnvValues()
   const cfg = config || await readJson(configPath, {})
@@ -478,11 +549,23 @@ app.get('/api/dashboard', async (_req, res) => {
     },
     reports,
     latestRows: await latestRows(reports),
-    latestLowfanRows: await latestRowsByPrefix(reports, 'lowfan_'),
-    latestAccountRows: await latestRowsByPrefix(reports, 'account_new'),
+    latestLowfanRows: await latestRowsByKind(reports, 'lowfan'),
+    latestAccountRows: await latestRowsByKind(reports, 'account_new'),
     feedback: feedbackSettings(envValues),
     state,
   })
+})
+
+app.get('/api/reports/:name', async (req, res) => {
+  const config = await readJson(configPath, {})
+  const outputDir = path.resolve(monitorDir, config.output_dir || '../../douyin-monitor-output')
+  const safeName = path.basename(String(req.params.name || ''))
+  const reportPath = path.join(outputDir, 'runs', safeName)
+  if (!(await exists(reportPath))) {
+    res.status(404).send('报告不存在')
+    return
+  }
+  res.download(reportPath, safeName)
 })
 
 app.get('/api/settings/integrations', async (_req, res) => {
@@ -661,7 +744,7 @@ app.post('/api/run/account', async (req, res) => {
     '--limit',
     String(asPositiveNumber(body.limit, 2)),
     '--timeout',
-    String(asPositiveNumber(body.timeout, 12)),
+    String(asPositiveNumber(body.timeout, 30)),
   ]
   if (body.maxAccounts && body.maxAccounts !== 'all') {
     args.push('--max-accounts', String(asPositiveNumber(body.maxAccounts, 3)))
@@ -670,7 +753,8 @@ app.post('/api/run/account', async (req, res) => {
   if (body.download) args.push('--download')
   if (body.transcribe) args.push('--transcribe')
   try {
-    res.json(await runMonitorWithRows(args))
+    const result = await runMonitorWithRows(args)
+    res.json({ ...result, notification: await notifyRun('account', result) })
   } finally {
     await fs.rm(runConfigPath, { force: true })
   }
@@ -724,7 +808,8 @@ app.post('/api/run/lowfan', async (req, res) => {
     String(asPositiveNumber(body.count, lowFanConfig.count)),
   ]
   if (body.fallbackRoute !== false) args.push('--fallback-route')
-  res.json(await runMonitorWithRows(args))
+  const result = await runMonitorWithRows(args)
+  res.json({ ...result, notification: await notifyRun('lowfan', result) })
 })
 
 app.post('/api/settings/douyin-session', async (req, res) => {

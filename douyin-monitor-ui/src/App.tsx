@@ -142,6 +142,7 @@ type ConfigSummary = {
 type ReportFile = {
   name: string
   path: string
+  url?: string
   type: 'json' | 'csv' | 'md'
   size: number
   modifiedAt: string
@@ -395,7 +396,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(text || response.statusText)
+    let message = text
+    try {
+      const payload = JSON.parse(text) as { error?: string; stderr?: string }
+      message = payload.error || payload.stderr || text
+    } catch {
+      message = text
+    }
+    throw new Error(message || response.statusText)
   }
   return response.json() as Promise<T>
 }
@@ -426,6 +434,7 @@ function formatBytes(value: number) {
 }
 
 function parseRunOutput(result?: RunResult) {
+  if (result?.parsed) return result.parsed
   if (!result?.stdout) return null
   const start = result.stdout.indexOf('{')
   const end = result.stdout.lastIndexOf('}')
@@ -516,7 +525,7 @@ function App() {
   const [minComment, setMinComment] = useState(500)
   const [minShare, setMinShare] = useState(500)
   const [limit, setLimit] = useState(2)
-  const [timeout, setTimeoutValue] = useState(18)
+  const [timeout, setTimeoutValue] = useState(30)
   const [includeSeen, setIncludeSeen] = useState(false)
   const [downloadVideo, setDownloadVideo] = useState(false)
   const [transcribe, setTranscribe] = useState(false)
@@ -1184,7 +1193,7 @@ function App() {
           </section>
         )}
 
-        {activePage === 'reports' && <ReportsPage reports={data.reports} />}
+        {activePage === 'reports' && <ReportsPage outputDir={data.config.outputDir} reports={data.reports} />}
         {activePage === 'ops' && <OpsPage data={data} lastErrors={lastErrors} lastRun={lastRun} parsedRun={parsedRun} providerStatus={providerStatus} />}
         {activePage === 'about' && <AboutPage />}
         {activePage === 'feedback' && (
@@ -1265,6 +1274,10 @@ function LowfanPanel({
       <CardContent>
         <PanelTitle icon={Search} title="搜索条件" />
         <p className="panel-copy">用于主动发现“账号粉丝不高，但单条内容互动明显跑出来”的素材。</p>
+        <div className="cost-strip">
+          <Sparkles className="size-4" />
+          低粉爆款会调用 TikHub 搜索接口；先用小页数测试，正式批量跑前看 TikHub 额度。
+        </div>
         <div className="form-grid">
           <Field label="关键词">
             <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="AI智能体 / 口播 / 副业" />
@@ -1366,12 +1379,16 @@ function AccountPanel({
       <CardContent>
         <PanelTitle icon={ShieldCheck} title="监控批次" />
         <p className="panel-copy">用于固定跟踪对标账号池；运行时默认使用所有已启用账号，保存后会写入 config.json，下次直接沿用。</p>
+        <div className="cost-strip">
+          <Server className="size-4" />
+          账号监控基础抓取走本地解析服务；只有勾选下载、转写或接入云端转写时，才会额外占用本机资源或云端额度。
+        </div>
         <div className="form-grid account-form">
           <Field label="每账号条数">
             <NumberInput value={limit} min={1} max={10} onChange={setLimit} />
           </Field>
           <Field label="请求超时">
-            <NumberInput value={timeout} min={8} max={60} onChange={setTimeoutValue} />
+            <NumberInput value={timeout} min={15} max={90} onChange={setTimeoutValue} />
           </Field>
         </div>
         <div className="switch-panel compact">
@@ -1454,11 +1471,21 @@ function formatAccountRunMessage(result: RunResult | undefined, enabledCount: nu
   const firstError = errors[0]
   if (firstError && typeof firstError === 'object') {
     const account = String((firstError as Record<string, unknown>).account || '账号')
-    const error = String((firstError as Record<string, unknown>).error || '运行失败')
+    const error = friendlyRunError(String((firstError as Record<string, unknown>).error || '运行失败'))
     return `${account}：${error}`
   }
 
-  return result.stderr || '账号监控失败，请查看运行诊断。'
+  return friendlyRunError(result.stderr) || '账号监控失败，请查看运行诊断。'
+}
+
+function friendlyRunError(value?: string) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  const lower = text.toLowerCase()
+  if (lower.includes('timed out') || lower.includes('timeout')) {
+    return '抖音接口响应超时。建议稍后重试，或把请求超时调到 30-60 秒；如果连续超时，请检查登录态、代理和解析服务。'
+  }
+  return text
 }
 
 function SessionPanel({
@@ -1818,10 +1845,10 @@ function ReportsCard({ reports }: { reports: ReportFile[] }) {
         <div className="report-list">
           {reports.length ? (
             reports.map((report) => (
-              <div className="report-item" key={report.path}>
+              <a className="report-item" href={report.url || '#'} key={report.path} target="_blank" rel="noreferrer">
                 <span>{report.name}</span>
                 <Badge>{report.type.toUpperCase()}</Badge>
-              </div>
+              </a>
             ))
           ) : (
             <div className="report-item empty">暂无报告</div>
@@ -1860,9 +1887,23 @@ function AlertsCard({ lastErrors }: { lastErrors: unknown[] }) {
   )
 }
 
-function ReportsPage({ reports }: { reports: ReportFile[] }) {
+function ReportsPage({ outputDir, reports }: { outputDir: string; reports: ReportFile[] }) {
+  const jsonCount = reports.filter((report) => report.type === 'json').length
+  const mdCount = reports.filter((report) => report.type === 'md').length
+
   return (
     <section className="reports-page">
+      <Card className="history-guide-card">
+        <CardContent>
+          <PanelTitle icon={History} title="历史记录怎么保存" />
+          <p>每次低粉爆款搜索和对标账号监控都会写入本地归档目录，服务重启后仍从这里读取历史记录。运营同事直接看本页；需要给别人分析时，优先下载 Markdown 或 CSV。</p>
+          <div className="history-meta">
+            <span>本地目录：{outputDir || '等待读取'}/runs</span>
+            <span>JSON {jsonCount} 份</span>
+            <span>Markdown {mdCount} 份</span>
+          </div>
+        </CardContent>
+      </Card>
       {reports.length ? (
         reports.map((report) => (
           <Card className="report-row-card" key={report.path}>
@@ -1874,6 +1915,10 @@ function ReportsPage({ reports }: { reports: ReportFile[] }) {
               </div>
               <span>{formatBytes(report.size)}</span>
               <time>{formatMonthDay(report.modifiedAt)} {formatClock(report.modifiedAt)}</time>
+              <a className="report-open-link" href={report.url || '#'} target="_blank" rel="noreferrer">
+                <Download className="size-4" />
+                下载
+              </a>
             </CardContent>
           </Card>
         ))
@@ -1920,6 +1965,8 @@ function OpsPage({
 function AboutPage() {
   return (
     <section className="about-page">
+      <CostGuide />
+      <DeploymentGuide />
       <Card className="about-card">
         <CardContent>
           <PanelTitle icon={ChartNoAxesColumnIncreasing} title="两个目录为什么要分开" />
@@ -1934,6 +1981,51 @@ function AboutPage() {
         </CardContent>
       </Card>
     </section>
+  )
+}
+
+function CostGuide() {
+  return (
+    <Card className="about-card cost-guide-card">
+      <CardContent>
+        <PanelTitle icon={Gauge} title="哪些操作会消耗额度" />
+        <div className="cost-guide-grid">
+          <div>
+            <strong>低粉爆款搜索</strong>
+            <p>会调用 TikHub 搜索接口，通常按请求或套餐消耗。页数越多、关键词越多，消耗越多。</p>
+          </div>
+          <div>
+            <strong>对标账号监控</strong>
+            <p>基础抓取走本地解析服务，主要消耗 Mac mini 和网络资源；如果接入商业数据接口或代理，也会产生对应费用。</p>
+          </div>
+          <div>
+            <strong>下载视频</strong>
+            <p>不消耗 Lemonfox，但会占本机磁盘、带宽和解析服务请求。批量跑时建议先小批量验证。</p>
+          </div>
+          <div>
+            <strong>提取口播文稿</strong>
+            <p>本地 faster-whisper 主要消耗机器算力；Lemonfox 云端转写会消耗云端额度。</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function DeploymentGuide() {
+  return (
+    <Card className="about-card deployment-guide-card">
+      <CardContent>
+        <PanelTitle icon={Server} title="现阶段推荐部署方式" />
+        <p>当前不需要先做公网网站。更稳妥的方式是把闲置 Mac mini 当成公司内网服务器：Mac mini 常开 Docker Compose，同事在同一网络访问 `http://Mac-mini-局域网IP:5174`，报告继续落在本地目录，飞书群机器人负责把运行结果和异常通知到群里。</p>
+        <div className="deployment-steps">
+          <span>1. Mac mini 固定局域网 IP</span>
+          <span>2. 启动本项目 Docker Compose</span>
+          <span>3. 公司同事访问 5174 页面</span>
+          <span>4. 用飞书机器人/多维表格承接通知和反馈</span>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

@@ -703,6 +703,27 @@ a {
   overflow-wrap: anywhere;
 }
 
+.cost-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  color: #9fb0c5;
+  background: rgba(0, 213, 255, 0.08);
+  border: 1px solid rgba(0, 213, 255, 0.14);
+  border-radius: 10px;
+  font-size: clamp(12px, 0.72vw, 13px);
+  font-weight: 800;
+  line-height: 1.55;
+}
+
+.cost-strip svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1149,6 +1170,11 @@ a {
   font-size: clamp(16px, 1.1vw, 20px);
 }
 
+:root[data-theme="light"] .date-label {
+  color: #51637a;
+  font-weight: 800;
+}
+
 .timeline-row {
   display: grid;
   grid-template-columns: clamp(86px, 7vw, 120px) minmax(0, 1fr);
@@ -1169,6 +1195,10 @@ a {
   font-weight: 900;
 }
 
+:root[data-theme="light"] .time-col {
+  color: #203348;
+}
+
 .time-col::after {
   content: "";
   position: absolute;
@@ -1177,6 +1207,10 @@ a {
   bottom: -18px;
   width: 1px;
   background: rgba(148, 163, 184, 0.22);
+}
+
+:root[data-theme="light"] .time-col::after {
+  background: rgba(51, 65, 85, 0.18);
 }
 
 .time-col i {
@@ -1189,6 +1223,10 @@ a {
   border-radius: 999px;
   box-shadow: 0 0 18px rgba(0, 224, 164, 0.85);
   z-index: 1;
+}
+
+:root[data-theme="light"] .time-col i {
+  box-shadow: 0 0 0 4px rgba(8, 127, 91, 0.12);
 }
 
 .feed-card {
@@ -1485,9 +1523,37 @@ a {
   grid-template-columns: 1fr;
 }
 
+.history-guide-card {
+  background:
+    linear-gradient(135deg, rgba(0, 213, 255, 0.08), rgba(0, 224, 164, 0.04)),
+    rgba(13, 20, 34, 0.84);
+}
+
+.history-meta,
+.deployment-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.history-meta span,
+.deployment-steps span {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  padding: 5px 9px;
+  color: #9fb0c5;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 8px;
+  font-size: clamp(12px, 0.72vw, 13px);
+  font-weight: 800;
+}
+
 .report-row-card .card-content {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 18px;
   align-items: center;
 }
@@ -1512,6 +1578,38 @@ a {
   font-weight: 900;
 }
 
+.report-open-link {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  color: #dbeafe;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 8px;
+  font-size: clamp(12px, 0.72vw, 13px);
+  font-weight: 900;
+}
+
+:root[data-theme="light"] .history-guide-card {
+  background:
+    linear-gradient(135deg, rgba(0, 127, 163, 0.08), rgba(8, 127, 91, 0.04)),
+    rgba(255, 255, 255, 0.9);
+}
+
+:root[data-theme="light"] .report-row-card strong,
+:root[data-theme="light"] .report-open-link {
+  color: #102033;
+}
+
+:root[data-theme="light"] .report-row-card span,
+:root[data-theme="light"] .report-row-card time,
+:root[data-theme="light"] .history-meta span,
+:root[data-theme="light"] .deployment-steps span {
+  color: #51637a;
+}
+
 .ops-diagnostics {
   display: flex;
   flex-wrap: wrap;
@@ -1522,6 +1620,36 @@ a {
   background:
     linear-gradient(135deg, rgba(251, 191, 36, 0.08), rgba(0, 213, 255, 0.04)),
     rgba(13, 20, 34, 0.84);
+}
+
+.cost-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.cost-guide-grid > div {
+  padding: 12px;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  border-radius: 10px;
+}
+
+.cost-guide-grid strong {
+  color: #e8f4ff;
+  font-weight: 900;
+}
+
+.cost-guide-grid p {
+  margin: 8px 0 0;
+  color: #8c9db2;
+  line-height: 1.65;
+  font-size: clamp(12px, 0.72vw, 13px);
+}
+
+:root[data-theme="light"] .cost-guide-grid strong {
+  color: #102033;
 }
 
 .report-item,
@@ -1619,6 +1747,10 @@ a {
   .report-row-card .card-content {
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
+  }
+
+  .cost-guide-grid {
+    grid-template-columns: 1fr;
   }
 
   .account-form,
