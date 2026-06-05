@@ -1078,7 +1078,6 @@ function App() {
 
         {activePage === 'overview' && (
           <>
-            <BoundaryBrief />
             <section className="summary-grid">
               <FeatureTile icon={Search} title="低粉爆款" value={resultMode === 'lowfan' ? `${displayRows.length} 条命中` : '关键词发现'} onClick={() => navigate('lowfan')} />
               <FeatureTile icon={LayoutList} title="监控账号" value={`${data.config.enabledAccountCount} 个启用`} onClick={() => navigate('accounts')} />
@@ -1233,28 +1232,6 @@ function FeatureTile({ icon: Icon, title, value, onClick }: { icon: IconComponen
       <span>{title}</span>
       <strong>{value}</strong>
     </button>
-  )
-}
-
-function BoundaryBrief() {
-  return (
-    <section className="boundary-brief">
-      <div>
-        <span>看结果</span>
-        <strong>素材精选</strong>
-        <p>低粉爆款和账号监控跑出来的内容都汇总到这里，重点看标题、互动、视频、文稿和拆解价值。</p>
-      </div>
-      <div>
-        <span>管来源</span>
-        <strong>监控账号</strong>
-        <p>只维护账号池和巡检批次，决定抓哪些账号、每次抓几条、是否下载视频和提取口播文稿。</p>
-      </div>
-      <div>
-        <span>协作推进</span>
-        <strong>飞书结果库</strong>
-        <p>Base 负责去重、负责人、处理状态、选题价值和是否采纳，适合拉同事一起标注。</p>
-      </div>
-    </section>
   )
 }
 

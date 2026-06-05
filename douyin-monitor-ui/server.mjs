@@ -509,6 +509,31 @@ function reportRunId(reports = {}) {
   return name ? name.replace(/\.(md|json|csv)$/i, '') : safeIsoDateTime()
 }
 
+async function readTextPreview(filePath, maxLength = 3500) {
+  if (!filePath) return ''
+  try {
+    const content = await fs.readFile(filePath, 'utf8')
+    return truncateText(content, maxLength)
+  } catch {
+    return ''
+  }
+}
+
+function materialSummary(row) {
+  const author = row.source_account || row.author || '未知账号'
+  const reason = row.hit_reason ? `推荐理由：${row.hit_reason}` : '推荐理由：待人工判断'
+  return truncateText(`${author} ｜ ${rowMetricLine(row)} ｜ ${reason}`, 700)
+}
+
+function operationSuggestion(row, kind, index) {
+  if (kind === 'account') {
+    const rank = Number(index) + 1
+    return `来自监控账号池第 ${rank} 条新素材。建议先判断选题角度、标题结构、口播节奏和评论区反馈；需要创作复用时再下载无水印视频或提取文稿。`
+  }
+  const keyword = row.keyword ? `关键词“${row.keyword}”` : '本次关键词'
+  return `来自${keyword}低粉爆款搜索。建议优先看标题钩子、封面承诺、互动异常点和转发理由；适合沉淀到选题池后再安排改写或视频创作。`
+}
+
 async function feishuTenantAccessToken(settings) {
   const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
     method: 'POST',
@@ -525,19 +550,24 @@ async function feishuTenantAccessToken(settings) {
   return payload.tenant_access_token
 }
 
-function feishuRecordFields(kind, result, row, index, envValues = {}, options = {}) {
+async function feishuRecordFields(kind, result, row, index, envValues = {}, options = {}) {
   const reports = result.parsed?.reports || {}
   const runId = reportRunId(reports)
+  const materialKind = kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控'
+  const transcriptText = await readTextPreview(row.transcript_path, 3500)
   const fields = {
     去重键: dedupeKeyForRow(kind, row),
     运行ID: runId,
-    运行类型: kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控',
+    运行类型: materialKind,
     本次序号: index + 1,
     标题: truncateText(row.title || '未命名作品', 500),
+    素材类型: materialKind,
+    素材摘要: materialSummary(row),
+    口播正文: transcriptText,
+    运营建议: operationSuggestion(row, kind, index),
     作者: row.author || '',
     来源账号: row.source_account || '',
     关键词: row.keyword || '',
-    视频ID: row.video_id || '',
     原视频链接: row.url || '',
     封面链接: row.cover_url || '',
     视频源链接: row.video_url || '',
@@ -718,7 +748,7 @@ async function syncRunToFeishuBase(kind, result, envValues = {}) {
     let created = 0
     let updated = 0
     for (const [index, row] of rows.slice(0, 200).entries()) {
-      const createFields = feishuRecordFields(kind, result, row, index, envValues, { includeCollaborationDefaults: true })
+      const createFields = await feishuRecordFields(kind, result, row, index, envValues, { includeCollaborationDefaults: true })
       const updateFields = fieldsWithoutCollaboration(createFields)
       const status = useOpenApi
         ? await openApiUpsertRecord(settings, token, createFields, updateFields)
