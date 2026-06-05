@@ -22,6 +22,7 @@ import {
   MessageSquareText,
   Play,
   Plus,
+  Radar,
   RefreshCw,
   Save,
   Search,
@@ -958,10 +959,12 @@ function App() {
     <main className="app-frame">
       <aside className="app-sidebar">
         <div className="brand-card">
-          <div className="brand-word">
-            <span>DY</span>
-            <i />
-            <strong>HOT</strong>
+          <div className="brand-mark" aria-hidden="true">
+            <Radar className="size-5" />
+          </div>
+          <div className="brand-copy">
+            <strong>素材雷达</strong>
+            <span>Douyin Ops</span>
           </div>
         </div>
 
@@ -2101,12 +2104,6 @@ function AboutPage() {
         </CardContent>
       </Card>
       <LearningGrid />
-      <Card className="about-card">
-        <CardContent>
-          <PanelTitle icon={History} title="参考 AIHOT 的部分" />
-          <p>这里借鉴了 AIHOT 的左侧目录、顶部快速切换和信息流密度，但没有硬套新闻站结构。当前产品的核心是内部运营工作台，所以优先让配置、运行、归档、诊断都能直接落到页面。</p>
-        </CardContent>
-      </Card>
     </section>
   )
 }
