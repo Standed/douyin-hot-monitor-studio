@@ -304,6 +304,9 @@ function friendlyMonitorError(value) {
   if (lower.includes('timed out') || lower.includes('timeout')) {
     return '抖音接口响应超时。建议稍后重试，或把“请求超时”调到 30-60 秒；如果连续超时，优先检查登录态、代理和解析服务。'
   }
+  if (lower.includes('fetch_user_post_videos') || lower.includes('http 400') || lower.includes('an error occurred')) {
+    return '抖音账号作品接口返回异常。本次会自动尝试 TikHub 兜底；如果仍失败，请检查账号 ID、登录态、代理和解析服务。'
+  }
   if (lower.includes('cookie') || lower.includes('login') || text.includes('登录')) {
     return '抖音登录态可能失效。请到“接口配置”检查登录态，或在解析服务里更新 Cookie。'
   }
@@ -419,27 +422,195 @@ async function sendFeedbackNotification(feedback, webhook) {
   return { configured: true, sent: true }
 }
 
-async function sendRunNotification(kind, result, webhook) {
+function truncateText(value, maxLength = 80) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
+}
+
+function compactNumber(value) {
+  const number = Number(value || 0)
+  if (!Number.isFinite(number) || number <= 0) return '0'
+  if (number >= 10000) {
+    const compact = number / 10000
+    return `${compact >= 10 ? Math.round(compact) : compact.toFixed(1)}万`
+  }
+  return String(Math.round(number))
+}
+
+function cleanCardText(value) {
+  return String(value || '').replace(/[<>]/g, '').trim()
+}
+
+function reportBaseUrl(envValues = {}) {
+  return [
+    process.env.FEISHU_REPORT_BASE_URL,
+    envValues.FEISHU_REPORT_BASE_URL,
+    process.env.DY_HOT_PUBLIC_URL,
+    envValues.DY_HOT_PUBLIC_URL,
+    process.env.APP_PUBLIC_URL,
+    envValues.APP_PUBLIC_URL,
+    process.env.PUBLIC_BASE_URL,
+    envValues.PUBLIC_BASE_URL,
+  ].find((value) => String(value || '').trim())
+}
+
+function reportLink(reportPath, envValues = {}) {
+  const baseUrl = reportBaseUrl(envValues)
+  if (!reportPath || !baseUrl) return ''
+  return `${String(baseUrl).replace(/\/$/, '')}/api/reports/${encodeURIComponent(path.basename(reportPath))}`
+}
+
+function reportFileName(reportPath) {
+  return reportPath ? path.basename(reportPath) : ''
+}
+
+function sourceApiLabel(value) {
+  const source = String(value || '').toLowerCase()
+  if (source.includes('tikhub')) return 'TikHub 兜底'
+  if (source.includes('local')) return '本地解析'
+  if (source) return source
+  return ''
+}
+
+function rowMetricLine(row) {
+  return [
+    `粉丝 ${compactNumber(row.follower_count)}`,
+    `赞 ${compactNumber(row.like_count)}`,
+    `评 ${compactNumber(row.comment_count)}`,
+    `藏 ${compactNumber(row.collect_count)}`,
+    `转 ${compactNumber(row.share_count)}`,
+  ].join(' / ')
+}
+
+function runCardRow(row, index) {
+  const author = row.source_account || row.author || '未知账号'
+  const lines = [
+    `**${index}. ${cleanCardText(truncateText(row.title || '未命名作品', 58))}**`,
+    `${cleanCardText(author)} ｜ ${rowMetricLine(row)}`,
+  ]
+  if (row.hit_reason) lines.push(`推荐理由：${cleanCardText(truncateText(row.hit_reason, 72))}`)
+  const apiLabel = sourceApiLabel(row.source_api)
+  if (apiLabel) lines.push(`来源：${apiLabel}`)
+  if (row.url) lines.push(`[打开原视频](${row.url})`)
+  return lines.join('\n')
+}
+
+function runSummaryMarkdown(kind, result, reports, envValues) {
+  const rows = Array.isArray(result.rows) ? result.rows : []
+  const errors = Array.isArray(result.parsed?.errors) ? result.parsed.errors : []
+  const reportName = reportFileName(reports.md) || reportFileName(reports.csv)
+  const summary = [
+    `**结果**：${rows.length} 条`,
+    `**类型**：${kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控'}`,
+    reportName ? `**报告**：${reportName}` : '',
+  ].filter(Boolean)
+
+  if (!rows.length && result.ok) {
+    summary.push('本次没有命中。建议换关键词、放宽阈值，或减少筛选条件后再跑一次。')
+  }
+
+  if (errors.length) {
+    const message = errors
+      .slice(0, 3)
+      .map((entry) => `${entry.account || '账号'}：${entry.error || '运行失败'}`)
+      .join('\n')
+    summary.push(`**需要处理**：\n${cleanCardText(message)}`)
+  } else if (!result.ok && result.stderr) {
+    summary.push(`**需要处理**：${cleanCardText(result.stderr)}`)
+  }
+
+  const link = reportLink(reports.md, envValues)
+  if (!link) {
+    summary.push('提示：配置 DY_HOT_PUBLIC_URL 或 FEISHU_REPORT_BASE_URL 后，群卡片会出现可点击报告按钮。')
+  }
+
+  return summary.join('\n')
+}
+
+async function sendRunNotification(kind, result, webhook, envValues = {}) {
   if (!webhook) return { configured: false, sent: false }
   const parsed = result.parsed || {}
   const reports = parsed.reports || {}
-  const errors = Array.isArray(parsed.errors) ? parsed.errors : []
   const title = kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控'
   const status = result.ok ? '完成' : '需要处理'
+  const rows = Array.isArray(result.rows) ? result.rows : []
+  const reportMdUrl = reportLink(reports.md, envValues)
+  const reportCsvUrl = reportLink(reports.csv, envValues)
+  const elements = [
+    {
+      tag: 'markdown',
+      content: runSummaryMarkdown(kind, result, reports, envValues),
+    },
+  ]
+
+  if (rows.length) {
+    elements.push({ tag: 'hr' })
+    for (const [index, row] of rows.slice(0, 3).entries()) {
+      elements.push({
+        tag: 'markdown',
+        content: runCardRow(row, index + 1),
+      })
+    }
+  }
+
+  const actions = []
+  if (reportMdUrl) {
+    actions.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '打开 Markdown 报告' },
+      url: reportMdUrl,
+      type: 'primary',
+    })
+  }
+  if (reportCsvUrl) {
+    actions.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '下载 CSV' },
+      url: reportCsvUrl,
+      type: 'default',
+    })
+  }
+  const firstVideo = rows.find((row) => row.url)?.url
+  if (firstVideo) {
+    actions.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '打开第一条视频' },
+      url: firstVideo,
+      type: 'default',
+    })
+  }
+  if (actions.length) {
+    elements.push({ tag: 'action', actions: actions.slice(0, 3) })
+  }
+
+  elements.push({
+    tag: 'note',
+    elements: [
+      {
+        tag: 'plain_text',
+        content: `运行时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
+      },
+    ],
+  })
+
   const response = await fetch(webhook, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      msg_type: 'text',
-      content: {
-        text: [
-          `DY HOT ${title}${status}`,
-          `结果：${result.rows?.length || 0} 条`,
-          errors.length ? `提示：${errors.slice(0, 3).map((entry) => `${entry.account || '账号'}：${entry.error || '运行失败'}`).join('；')}` : '',
-          reports.md ? `Markdown：${reports.md}` : '',
-          reports.csv ? `CSV：${reports.csv}` : '',
-          `时间：${new Date().toISOString()}`,
-        ].filter(Boolean).join('\n'),
+      msg_type: 'interactive',
+      card: {
+        config: {
+          wide_screen_mode: true,
+          enable_forward: true,
+        },
+        header: {
+          template: result.ok ? 'green' : 'orange',
+          title: {
+            tag: 'plain_text',
+            content: `DY HOT ${title}${status}`,
+          },
+        },
+        elements,
       },
     }),
   })
@@ -453,7 +624,7 @@ async function notifyRun(kind, result) {
   const envValues = await readLocalEnvValues()
   const webhook = process.env.FEISHU_RUN_WEBHOOK || envValues.FEISHU_RUN_WEBHOOK || process.env.FEISHU_FEEDBACK_WEBHOOK || envValues.FEISHU_FEEDBACK_WEBHOOK || ''
   try {
-    return await sendRunNotification(kind, result, webhook)
+    return await sendRunNotification(kind, result, webhook, envValues)
   } catch (error) {
     return {
       configured: Boolean(webhook),
