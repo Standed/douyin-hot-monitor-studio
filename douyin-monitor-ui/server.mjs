@@ -245,10 +245,18 @@ function normalizeAccountMonitorConfig(value = {}, current = {}) {
   }
 }
 
+function monitorJobTimeoutMs(args = []) {
+  const envTimeout = Number(process.env.MONITOR_JOB_TIMEOUT_SECONDS || 0)
+  if (Number.isFinite(envTimeout) && envTimeout > 0) return envTimeout * 1000
+  if (args.includes('--transcribe')) return 1000 * 60 * 20
+  if (args.includes('--download')) return 1000 * 60 * 10
+  return 1000 * 60 * 5
+}
+
 function runMonitor(args) {
   return new Promise((resolve) => {
     const command = `${python} ${monitorScript} ${args.join(' ')}`
-    execFile(python, [monitorScript, ...args], { cwd: monitorDir, env: process.env, timeout: 1000 * 300, maxBuffer: 1024 * 1024 * 8 }, (error, stdout, stderr) => {
+    execFile(python, [monitorScript, ...args], { cwd: monitorDir, env: process.env, timeout: monitorJobTimeoutMs(args), maxBuffer: 1024 * 1024 * 8 }, (error, stdout, stderr) => {
       resolve({
         ok: !error,
         command,
@@ -544,8 +552,8 @@ function feishuRecordFields(kind, result, row, index, envValues = {}, options = 
     来源API: sourceApiLabel(row.source_api),
     资产状态: row.transcript_status === 'ok' ? '视频与文稿可用' : row.local_video_path ? '视频可用' : '未下载',
     无水印视频: assetLink(row.local_video_path, envValues) || row.local_video_path || '',
-    口播文稿: assetLink(row.transcript_path, envValues) || row.transcript_path || '',
-    SRT字幕: assetLink(row.srt_path, envValues) || row.srt_path || '',
+    口播文稿: assetLink(row.transcript_path, envValues, { inline: true }) || row.transcript_path || '',
+    SRT字幕: assetLink(row.srt_path, envValues, { inline: true }) || row.srt_path || '',
     Markdown报告: reportLink(reports.md, envValues) || reportFileName(reports.md),
     CSV报告: reportLink(reports.csv, envValues) || reportFileName(reports.csv),
     同步时间: safeLocalDateTime(),
@@ -778,10 +786,11 @@ function reportLink(reportPath, envValues = {}) {
   return `${String(baseUrl).replace(/\/$/, '')}/api/reports/${encodeURIComponent(path.basename(reportPath))}`
 }
 
-function assetLink(assetPath, envValues = {}) {
+function assetLink(assetPath, envValues = {}, options = {}) {
   const baseUrl = reportBaseUrl(envValues)
   if (!assetPath || !baseUrl) return ''
-  return `${String(baseUrl).replace(/\/$/, '')}/api/assets?path=${encodeURIComponent(assetPath)}`
+  const inline = options.inline ? '&inline=1' : ''
+  return `${String(baseUrl).replace(/\/$/, '')}/api/assets?path=${encodeURIComponent(assetPath)}${inline}`
 }
 
 function reportFileName(reportPath) {
@@ -1355,6 +1364,7 @@ app.get('/api/assets', async (req, res) => {
   const outputDir = path.resolve(monitorDir, config.output_dir || '../../douyin-monitor-output')
   const assetsDir = path.join(outputDir, 'assets')
   const rawPath = String(req.query.path || '')
+  const inline = String(req.query.inline || '') === '1'
   const assetPath = path.resolve(rawPath)
   if (!rawPath || !assetPath.startsWith(`${assetsDir}${path.sep}`)) {
     res.status(403).send('资产路径不允许访问')
@@ -1362,6 +1372,14 @@ app.get('/api/assets', async (req, res) => {
   }
   if (!(await exists(assetPath))) {
     res.status(404).send('资产不存在')
+    return
+  }
+  const textLikeTypes = new Set(['.txt', '.srt', '.vtt', '.md', '.csv', '.json'])
+  if (inline && textLikeTypes.has(path.extname(assetPath).toLowerCase())) {
+    const ext = path.extname(assetPath).toLowerCase()
+    const mime = ext === '.md' ? 'text/markdown' : ext === '.json' ? 'application/json' : ext === '.csv' ? 'text/csv' : 'text/plain'
+    res.type(`${mime}; charset=utf-8`)
+    res.send(await fs.readFile(assetPath, 'utf8'))
     return
   }
   res.download(assetPath, path.basename(assetPath))

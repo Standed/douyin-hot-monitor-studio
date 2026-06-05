@@ -296,9 +296,9 @@ type PageId = 'overview' | 'lowfan' | 'accounts' | 'settings' | 'reports' | 'ops
 const pageIds: PageId[] = ['overview', 'lowfan', 'accounts', 'settings', 'reports', 'ops', 'about', 'feedback']
 
 const navItems: Array<{ id: PageId; icon: IconComponent; label: string; desc: string }> = [
-  { id: 'overview', icon: Zap, label: '精选总览', desc: '素材流和运行状态' },
+  { id: 'overview', icon: Zap, label: '素材精选', desc: '结果和资产' },
   { id: 'lowfan', icon: Search, label: '低粉爆款', desc: '关键词发现' },
-  { id: 'accounts', icon: LayoutList, label: '对标账号', desc: '账号追踪' },
+  { id: 'accounts', icon: LayoutList, label: '监控账号', desc: '账号池巡检' },
   { id: 'settings', icon: Settings2, label: '接口配置', desc: 'TikHub / Lemonfox' },
   { id: 'reports', icon: FileText, label: '归档报告', desc: 'JSON / CSV / MD' },
   { id: 'ops', icon: ShieldCheck, label: '运行诊断', desc: '服务和错误' },
@@ -311,9 +311,9 @@ const utilityPageIds: PageId[] = ['ops', 'about', 'feedback']
 
 const pageCopy: Record<PageId, { title: string; eyebrow: string; description: string }> = {
   overview: {
-    title: '抖音爆款监控台',
-    eyebrow: '运营素材雷达',
-    description: '汇总低粉爆款、对标账号、接口状态和最近归档，适合运营同事每天扫一遍。',
+    title: '素材精选',
+    eyebrow: 'Material Review',
+    description: '集中查看已经命中的视频、文稿、互动数据和报告；这里不维护账号池，只做素材筛选和拆解。',
   },
   lowfan: {
     title: '低粉爆款搜索',
@@ -321,9 +321,9 @@ const pageCopy: Record<PageId, { title: string; eyebrow: string; description: st
     description: '按关键词搜索粉丝不高但互动异常好的作品，用来找选题、封面、口播和账号打法。',
   },
   accounts: {
-    title: '对标账号监控',
+    title: '监控账号管理',
     eyebrow: 'Benchmark Watch',
-    description: '按监控账号的用户 ID 抓取对标账号最新作品，适合固定账号池的日常巡检。',
+    description: '维护固定对标账号池，设置下载和转写，按批次产出新素材。',
   },
   settings: {
     title: '接口与转写配置',
@@ -1078,9 +1078,10 @@ function App() {
 
         {activePage === 'overview' && (
           <>
+            <BoundaryBrief />
             <section className="summary-grid">
               <FeatureTile icon={Search} title="低粉爆款" value={resultMode === 'lowfan' ? `${displayRows.length} 条命中` : '关键词发现'} onClick={() => navigate('lowfan')} />
-              <FeatureTile icon={LayoutList} title="对标账号" value={`${data.config.enabledAccountCount} 个启用`} onClick={() => navigate('accounts')} />
+              <FeatureTile icon={LayoutList} title="监控账号" value={`${data.config.enabledAccountCount} 个启用`} onClick={() => navigate('accounts')} />
               <FeatureTile icon={Settings2} title="接口配置" value={data.config.hasTikhubKey && data.config.hasLemonfoxKey ? '关键接口已接入' : '有接口待配置'} onClick={() => navigate('settings')} />
             </section>
             <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} />
@@ -1232,6 +1233,28 @@ function FeatureTile({ icon: Icon, title, value, onClick }: { icon: IconComponen
       <span>{title}</span>
       <strong>{value}</strong>
     </button>
+  )
+}
+
+function BoundaryBrief() {
+  return (
+    <section className="boundary-brief">
+      <div>
+        <span>看结果</span>
+        <strong>素材精选</strong>
+        <p>低粉爆款和账号监控跑出来的内容都汇总到这里，重点看标题、互动、视频、文稿和拆解价值。</p>
+      </div>
+      <div>
+        <span>管来源</span>
+        <strong>监控账号</strong>
+        <p>只维护账号池和巡检批次，决定抓哪些账号、每次抓几条、是否下载视频和提取口播文稿。</p>
+      </div>
+      <div>
+        <span>协作推进</span>
+        <strong>飞书结果库</strong>
+        <p>Base 负责去重、负责人、处理状态、选题价值和是否采纳，适合拉同事一起标注。</p>
+      </div>
+    </section>
   )
 }
 
@@ -1402,8 +1425,8 @@ function AccountPanel({
     <Card className="control-card account-card page-card">
       <CardContent>
         <div className="account-hero">
-          <PanelTitle icon={ShieldCheck} title="监控批次" />
-          <p>固定巡检对标账号池，适合每天看新增作品、素材方向和脚本表达变化。</p>
+          <PanelTitle icon={ShieldCheck} title="账号池与巡检" />
+          <p>这里负责来源管理和批次运行；跑出来的作品会进入“素材精选”和飞书结果库。</p>
           <div className="account-run-stats">
             <span>
               <b>{enabledDraftCount}</b>
@@ -1432,13 +1455,18 @@ function AccountPanel({
         <div className="asset-decision">
           <div>
             <Database className="size-4" />
-            <strong>资产落点</strong>
-            <p>网页端保存无水印视频和口播文稿，飞书多维表格保存索引、链接、负责人和处理状态。</p>
+            <strong>网站端</strong>
+            <p>直接查看结果卡，打开原视频，下载无水印视频，在线查看或下载口播文稿。</p>
           </div>
           <div>
             <Timer className="size-4" />
-            <strong>耗时预估</strong>
-            <p>只抓作品通常几十秒；下载按视频大小增加；本地转写一般按视频时长的 0.5-2 倍浮动。</p>
+            <strong>飞书端</strong>
+            <p>保存去重后的素材索引、文稿链接、负责人、处理状态、选题价值和采纳结果。</p>
+          </div>
+          <div>
+            <Captions className="size-4" />
+            <strong>生成耗时</strong>
+            <p>只抓作品通常几十秒；下载看视频大小；本地转写一般按视频时长的 0.5-2 倍浮动。</p>
           </div>
         </div>
 
@@ -1842,6 +1870,10 @@ function assetDownloadUrl(path?: string) {
   return path ? `/api/assets?path=${encodeURIComponent(path)}` : ''
 }
 
+function assetViewUrl(path?: string) {
+  return path ? `/api/assets?path=${encodeURIComponent(path)}&inline=1` : ''
+}
+
 function uniqueCount(values: Array<string | undefined>) {
   return new Set(values.filter(Boolean)).size
 }
@@ -1864,8 +1896,8 @@ function AccountResultsPanel({
     <section className="account-results-panel">
       <div className="account-results-head">
         <div>
-          <PanelTitle icon={LayoutList} title="监控结果" />
-          <p>最新作品会先进入本地网页端，适合预览、下载、拆解；飞书多维表格更适合后续分配、标注和复盘。</p>
+          <PanelTitle icon={LayoutList} title="账号产出的素材" />
+          <p>这里展示本次账号巡检产物；需要分配负责人、标处理状态或判断是否采纳时，到飞书结果库继续推进。</p>
         </div>
         {latestReport?.url && (
           <a className="report-open-link" href={latestReport.url} target="_blank" rel="noreferrer">
@@ -2324,8 +2356,9 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
     : Math.min(99, Math.max(48, Math.round(((item.like_count || 0) + (item.collect_count || 0) + (item.comment_count || 0) + (item.share_count || 0)) / 35)))
   const hasAssets = Boolean(item.local_video_path || item.transcript_path)
   const localVideoUrl = assetDownloadUrl(item.local_video_path)
-  const transcriptUrl = assetDownloadUrl(item.transcript_path)
-  const srtUrl = assetDownloadUrl(item.srt_path)
+  const transcriptViewUrl = assetViewUrl(item.transcript_path)
+  const transcriptDownloadUrl = assetDownloadUrl(item.transcript_path)
+  const srtUrl = assetViewUrl(item.srt_path)
   const isBenchmark = Boolean(item.source_account)
 
   return (
@@ -2389,16 +2422,22 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
                 视频源
               </a>
             )}
-            {transcriptUrl && (
-              <a href={transcriptUrl} target="_blank" rel="noreferrer">
+            {transcriptViewUrl && (
+              <a className="asset-primary" href={transcriptViewUrl} target="_blank" rel="noreferrer">
                 <Captions className="size-4" />
+                查看文稿
+              </a>
+            )}
+            {transcriptDownloadUrl && (
+              <a href={transcriptDownloadUrl} target="_blank" rel="noreferrer">
+                <Download className="size-4" />
                 下载文稿
               </a>
             )}
             {srtUrl && (
               <a href={srtUrl} target="_blank" rel="noreferrer">
                 <FileText className="size-4" />
-                下载字幕
+                查看字幕
               </a>
             )}
           </div>

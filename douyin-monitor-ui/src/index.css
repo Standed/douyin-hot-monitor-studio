@@ -597,6 +597,58 @@ a {
   font-size: clamp(18px, 1.35vw, 24px);
 }
 
+.boundary-brief {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.boundary-brief > div {
+  min-width: 0;
+  padding: 14px;
+  background:
+    linear-gradient(135deg, rgba(0, 213, 255, 0.07), rgba(0, 224, 164, 0.05)),
+    rgba(16, 23, 38, 0.72);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
+}
+
+.boundary-brief span {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--accent);
+  font-size: clamp(11px, 0.68vw, 12px);
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.boundary-brief strong {
+  display: block;
+  color: var(--foreground);
+  font-size: clamp(15px, 0.95vw, 18px);
+  line-height: 1.25;
+}
+
+.boundary-brief p {
+  margin: 8px 0 0;
+  color: #8394aa;
+  line-height: 1.58;
+  font-size: clamp(12px, 0.72vw, 13px);
+}
+
+:root[data-theme="light"] .boundary-brief > div {
+  background:
+    linear-gradient(135deg, rgba(8, 145, 178, 0.08), rgba(16, 185, 129, 0.06)),
+    rgba(255, 255, 255, 0.76);
+  border-color: rgba(8, 145, 178, 0.16);
+}
+
+:root[data-theme="light"] .boundary-brief p {
+  color: #668099;
+}
+
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(340px, 0.9fr) minmax(0, 1.1fr);
@@ -797,7 +849,7 @@ a {
 
 .asset-decision {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-top: 12px;
 }
@@ -1600,6 +1652,18 @@ a {
   font-weight: 800;
 }
 
+.card-actions .asset-primary {
+  color: #00131a;
+  background: var(--accent);
+  border-color: rgba(0, 213, 255, 0.5);
+}
+
+:root[data-theme="light"] .card-actions .asset-primary {
+  color: #ffffff;
+  background: #0891b2;
+  border-color: rgba(8, 145, 178, 0.4);
+}
+
 :root[data-theme="light"] .card-actions a,
 :root[data-theme="light"] .card-actions button,
 :root[data-theme="light"] .tag-row span,
@@ -1957,6 +2021,8 @@ a {
   .workspace-grid,
   .accounts-workspace,
   .summary-grid,
+  .boundary-brief,
+  .asset-decision,
   .learning-grid,
   .settings-layout {
     grid-template-columns: 1fr;
