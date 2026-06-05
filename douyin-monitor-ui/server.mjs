@@ -490,6 +490,10 @@ function feishuRecordFields(kind, result, row, index, envValues = {}) {
     推荐理由: row.hit_reason || '',
     发布时间: row.create_time || '',
     来源API: sourceApiLabel(row.source_api),
+    资产状态: row.transcript_status === 'ok' ? '视频与文稿可用' : row.local_video_path ? '视频可用' : '未下载',
+    无水印视频: assetLink(row.local_video_path, envValues) || row.local_video_path || '',
+    口播文稿: assetLink(row.transcript_path, envValues) || row.transcript_path || '',
+    SRT字幕: assetLink(row.srt_path, envValues) || row.srt_path || '',
     Markdown报告: reportLink(reports.md, envValues) || reportFileName(reports.md),
     CSV报告: reportLink(reports.csv, envValues) || reportFileName(reports.csv),
     同步时间: safeIsoDateTime(),
@@ -576,6 +580,12 @@ function reportLink(reportPath, envValues = {}) {
   const baseUrl = reportBaseUrl(envValues)
   if (!reportPath || !baseUrl) return ''
   return `${String(baseUrl).replace(/\/$/, '')}/api/reports/${encodeURIComponent(path.basename(reportPath))}`
+}
+
+function assetLink(assetPath, envValues = {}) {
+  const baseUrl = reportBaseUrl(envValues)
+  if (!assetPath || !baseUrl) return ''
+  return `${String(baseUrl).replace(/\/$/, '')}/api/assets?path=${encodeURIComponent(assetPath)}`
 }
 
 function reportFileName(reportPath) {
@@ -881,6 +891,23 @@ app.get('/api/reports/:name', async (req, res) => {
     return
   }
   res.download(reportPath, safeName)
+})
+
+app.get('/api/assets', async (req, res) => {
+  const config = await readJson(configPath, {})
+  const outputDir = path.resolve(monitorDir, config.output_dir || '../../douyin-monitor-output')
+  const assetsDir = path.join(outputDir, 'assets')
+  const rawPath = String(req.query.path || '')
+  const assetPath = path.resolve(rawPath)
+  if (!rawPath || !assetPath.startsWith(`${assetsDir}${path.sep}`)) {
+    res.status(403).send('资产路径不允许访问')
+    return
+  }
+  if (!(await exists(assetPath))) {
+    res.status(404).send('资产不存在')
+    return
+  }
+  res.download(assetPath, path.basename(assetPath))
 })
 
 app.get('/api/settings/integrations', async (_req, res) => {

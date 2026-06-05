@@ -432,9 +432,15 @@ def download_video(base: str, row: dict[str, Any], output_dir: Path) -> None:
         return
     folder = output_dir / "assets" / safe_name(row.get("title") or row["video_id"], 28)
     folder.mkdir(parents=True, exist_ok=True)
-    qs = urllib.parse.urlencode({"url": row["url"], "prefix": "true", "with_watermark": "false"})
+    download_url = row.get("video_url")
     try:
-        content = request_bytes(f"{base}/api/download?{qs}", timeout=180)
+        if download_url:
+            content = request_bytes(download_url, timeout=180)
+        else:
+            qs = urllib.parse.urlencode({"url": row["url"], "prefix": "true", "with_watermark": "false"})
+            content = request_bytes(f"{base}/api/download?{qs}", timeout=180)
+        if content.lstrip().startswith(b"{"):
+            raise ValueError(content[:500].decode("utf-8", errors="ignore"))
     except Exception as exc:
         row["download_error"] = str(exc)
         return

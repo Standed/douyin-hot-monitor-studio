@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock3,
   Computer,
+  Database,
   Download,
   ExternalLink,
   FileText,
@@ -29,6 +30,7 @@ import {
   Sparkles,
   Server,
   Sun,
+  Timer,
   Trash2,
   Users,
   Video,
@@ -165,6 +167,7 @@ type ReportRow = {
   video_url?: string
   local_video_path?: string
   transcript_path?: string
+  srt_path?: string
   transcript_provider?: string
   transcript_status?: string
   transcript_error?: string
@@ -1106,7 +1109,7 @@ function App() {
               thresholds={data.config.thresholds}
               onRun={runLowfan}
             />
-            <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} mode="compact" />
+            <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} />
           </section>
         )}
 
@@ -1131,7 +1134,7 @@ function App() {
               visibleAccounts={visibleAccounts}
               onRun={runAccount}
             />
-            <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} mode="compact" />
+            <AccountResultsPanel displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} />
           </section>
         )}
 
@@ -1393,17 +1396,31 @@ function AccountPanel({
   const enabledDraftCount = accountDrafts.filter((account) => account.enabled !== false && account.name.trim() && account.secUserId.trim()).length
   const accountRunResult = lastRun?.command.includes('account-run') || lastRun?.command.includes('/api/run/account') ? lastRun : undefined
   const accountRunMessage = formatAccountRunMessage(accountRunResult, enabledDraftCount)
+  const totalDraftCount = accountDrafts.filter((account) => account.name.trim() || account.secUserId.trim()).length
 
   return (
     <Card className="control-card account-card page-card">
       <CardContent>
-        <PanelTitle icon={ShieldCheck} title="监控批次" />
-        <p className="panel-copy">用于固定跟踪对标账号池；运行时默认使用所有已启用账号，保存后会写入 config.json，下次直接沿用。</p>
-        <div className="cost-strip">
-          <Server className="size-4" />
-          账号监控基础抓取走本地解析服务；只有勾选下载、转写或接入云端转写时，才会额外占用本机资源或云端额度。
+        <div className="account-hero">
+          <PanelTitle icon={ShieldCheck} title="监控批次" />
+          <p>固定巡检对标账号池，适合每天看新增作品、素材方向和脚本表达变化。</p>
+          <div className="account-run-stats">
+            <span>
+              <b>{enabledDraftCount}</b>
+              启用账号
+            </span>
+            <span>
+              <b>{limit}</b>
+              每账号条数
+            </span>
+            <span>
+              <b>{timeout}s</b>
+              请求超时
+            </span>
+          </div>
         </div>
-        <div className="form-grid account-form">
+
+        <div className="account-tune-grid">
           <Field label="每账号条数">
             <NumberInput value={limit} min={1} max={10} onChange={setLimit} />
           </Field>
@@ -1411,10 +1428,35 @@ function AccountPanel({
             <NumberInput value={timeout} min={15} max={90} onChange={setTimeoutValue} />
           </Field>
         </div>
-        <div className="switch-panel compact">
+
+        <div className="asset-decision">
+          <div>
+            <Database className="size-4" />
+            <strong>资产落点</strong>
+            <p>网页端保存无水印视频和口播文稿，飞书多维表格保存索引、链接、负责人和处理状态。</p>
+          </div>
+          <div>
+            <Timer className="size-4" />
+            <strong>耗时预估</strong>
+            <p>只抓作品通常几十秒；下载按视频大小增加；本地转写一般按视频时长的 0.5-2 倍浮动。</p>
+          </div>
+        </div>
+
+        <div className="switch-panel compact account-switches">
           <Switch label="包含已看过作品" checked={includeSeen} onCheckedChange={setIncludeSeen} />
           <Switch label="下载无水印视频" checked={downloadVideo} onCheckedChange={setDownloadVideo} />
           <Switch label="提取口播文稿" checked={transcribe} onCheckedChange={setTranscribe} />
+        </div>
+
+        <div className="account-section-head">
+          <div>
+            <strong>账号池</strong>
+            <span>{enabledDraftCount} 启用 / {totalDraftCount || accountDrafts.length} 行</span>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setAccountDrafts([...accountDrafts, createEmptyAccountDraft()])}>
+            <Plus className="size-4" />
+            添加账号
+          </Button>
         </div>
         <div className="account-editor">
           <div className="account-editor-head">
@@ -1446,13 +1488,13 @@ function AccountPanel({
         </div>
         <p className="panel-hint">用户 ID 是监控账号抖音主页网址里 /user/ 后、? 前的那一段，例如 https://www.douyin.com/user/MS4wLjAB...?from_tab_name=main 中的 MS4wLjAB...。</p>
         <div className="account-actions">
-          <Button variant="ghost" onClick={() => setAccountDrafts([...accountDrafts, createEmptyAccountDraft()])}>
-            <Plus className="size-4" />
-            添加账号
-          </Button>
           <Button variant="secondary" onClick={saveAccounts} disabled={running !== null}>
             {running === 'accounts' ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
             保存账号配置
+          </Button>
+          <Button className="account-run-button" variant="secondary" onClick={onRun} disabled={running !== null || enabledDraftCount === 0}>
+            {running === 'account' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+            {enabledDraftCount ? `开始监控 ${enabledDraftCount} 个账号` : '没有启用账号'}
           </Button>
         </div>
         <div className="account-list">
@@ -1474,10 +1516,6 @@ function AccountPanel({
               ? accountRunMessage
               : `将监控 ${enabledDraftCount} 个启用账号。`}
         </div>
-        <Button className="full-action" variant="secondary" onClick={onRun} disabled={running !== null || enabledDraftCount === 0}>
-          {running === 'account' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-          {enabledDraftCount ? `开始监控 ${enabledDraftCount} 个启用账号` : '没有启用账号'}
-        </Button>
       </CardContent>
     </Card>
   )
@@ -1800,6 +1838,65 @@ function LearningGrid() {
   )
 }
 
+function assetDownloadUrl(path?: string) {
+  return path ? `/api/assets?path=${encodeURIComponent(path)}` : ''
+}
+
+function uniqueCount(values: Array<string | undefined>) {
+  return new Set(values.filter(Boolean)).size
+}
+
+function AccountResultsPanel({
+  displayRows,
+  feedItems,
+  latestReport,
+}: {
+  displayRows: ReportRow[]
+  feedItems: ReportRow[]
+  latestReport?: ReportFile
+}) {
+  const rows = displayRows.length ? displayRows : []
+  const accountCount = uniqueCount(rows.map((row) => row.source_account || row.author))
+  const videoCount = rows.filter((row) => row.local_video_path || row.video_url).length
+  const transcriptCount = rows.filter((row) => row.transcript_path || row.transcript_status === 'ok').length
+
+  return (
+    <section className="account-results-panel">
+      <div className="account-results-head">
+        <div>
+          <PanelTitle icon={LayoutList} title="监控结果" />
+          <p>最新作品会先进入本地网页端，适合预览、下载、拆解；飞书多维表格更适合后续分配、标注和复盘。</p>
+        </div>
+        {latestReport?.url && (
+          <a className="report-open-link" href={latestReport.url} target="_blank" rel="noreferrer">
+            <FileText className="size-4" />
+            打开最新报告
+          </a>
+        )}
+      </div>
+      <div className="account-result-metrics">
+        <span>
+          <b>{rows.length}</b>
+          最新作品
+        </span>
+        <span>
+          <b>{accountCount || '-'}</b>
+          来源账号
+        </span>
+        <span>
+          <b>{videoCount}</b>
+          视频可取
+        </span>
+        <span>
+          <b>{transcriptCount}</b>
+          文稿可用
+        </span>
+      </div>
+      <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} mode="account" />
+    </section>
+  )
+}
+
 function TimelineSection({
   displayRows,
   feedItems,
@@ -1809,10 +1906,10 @@ function TimelineSection({
   displayRows: ReportRow[]
   feedItems: ReportRow[]
   latestReport?: ReportFile
-  mode?: 'compact'
+  mode?: 'compact' | 'account'
 }) {
   return (
-    <section className={mode === 'compact' ? 'timeline compact' : 'timeline'}>
+    <section className={mode ? `timeline ${mode}` : 'timeline'}>
       <div className="date-label">{formatMonthDay(latestReport?.modifiedAt)}</div>
       {feedItems.map((item, index) => (
         <TimelineItem item={item} index={index} key={`${item.video_id}-${index}`} empty={!displayRows.length} />
@@ -2226,6 +2323,10 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
     ? Math.min(99, Math.max(48, item.viral_score))
     : Math.min(99, Math.max(48, Math.round(((item.like_count || 0) + (item.collect_count || 0) + (item.comment_count || 0) + (item.share_count || 0)) / 35)))
   const hasAssets = Boolean(item.local_video_path || item.transcript_path)
+  const localVideoUrl = assetDownloadUrl(item.local_video_path)
+  const transcriptUrl = assetDownloadUrl(item.transcript_path)
+  const srtUrl = assetDownloadUrl(item.srt_path)
+  const isBenchmark = Boolean(item.source_account)
 
   return (
     <article className="timeline-row">
@@ -2233,7 +2334,7 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
         <strong>{formatClock(item.create_time)}</strong>
         <i />
       </div>
-      <Card className="feed-card">
+      <Card className={isBenchmark ? 'feed-card benchmark-feed-card' : 'feed-card'}>
         <CardContent>
           <div className="feed-head">
             <div className="source-line">
@@ -2251,7 +2352,7 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
           <p className="feed-desc">
             {empty
               ? '低粉爆款搜索和对标账号监控已经接到本地页面。'
-              : item.transcript_error || item.download_error || item.hit_reason || '该素材已进入本地监控归档，可继续拆封面、标题、口播结构和互动数据。'}
+              : item.transcript_error || item.download_error || item.hit_reason || (isBenchmark ? '该作品来自对标账号池，可继续拆标题、封面、口播结构和创作角度。' : '该素材已进入本地监控归档，可继续拆封面、标题、口播结构和互动数据。')}
           </p>
 
           <div className="tag-row">
@@ -2263,8 +2364,10 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
           </div>
 
           <div className="reason-box">
-            <strong>推荐理由：</strong>
-            {empty ? '先运行一次搜索或账号监控，命中的素材会按时间线展示在这里。' : item.hit_reason || `互动数据超过监控阈值，适合做低粉爆款拆解。素材序号 ${index + 1}。`}
+            <strong>{isBenchmark ? '拆解提示：' : '推荐理由：'}</strong>
+            {empty
+              ? '先运行一次搜索或账号监控，命中的素材会按时间线展示在这里。'
+              : item.hit_reason || (isBenchmark ? `对标账号最新作品，可优先记录选题角度、标题结构和口播节奏。素材序号 ${index + 1}。` : `互动数据超过监控阈值，适合做低粉爆款拆解。素材序号 ${index + 1}。`)}
           </div>
 
           <div className="card-actions">
@@ -2274,17 +2377,29 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
                 打开原链接
               </a>
             )}
+            {localVideoUrl && (
+              <a href={localVideoUrl} target="_blank" rel="noreferrer">
+                <Download className="size-4" />
+                下载无水印
+              </a>
+            )}
             {item.video_url && (
               <a href={item.video_url} target="_blank" rel="noreferrer">
                 <Download className="size-4" />
                 视频源
               </a>
             )}
-            {item.transcript_path && (
-              <button>
+            {transcriptUrl && (
+              <a href={transcriptUrl} target="_blank" rel="noreferrer">
                 <Captions className="size-4" />
-                文稿已生成
-              </button>
+                下载文稿
+              </a>
+            )}
+            {srtUrl && (
+              <a href={srtUrl} target="_blank" rel="noreferrer">
+                <FileText className="size-4" />
+                下载字幕
+              </a>
             )}
           </div>
         </CardContent>
