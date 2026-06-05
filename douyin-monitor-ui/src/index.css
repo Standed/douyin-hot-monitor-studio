@@ -707,23 +707,25 @@ a {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+  align-items: start;
 }
 
 .account-form {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(180px, 240px));
+  justify-content: start;
 }
 
 .account-editor {
   display: grid;
-  gap: 8px;
-  margin-top: 14px;
+  gap: 10px;
+  margin-top: 16px;
 }
 
 .account-editor-head,
 .account-editor-row {
   display: grid;
-  grid-template-columns: minmax(78px, 0.34fr) minmax(148px, 0.66fr) minmax(220px, 1.08fr) minmax(220px, 0.86fr);
-  gap: 10px;
+  grid-template-columns: minmax(78px, 0.34fr) minmax(150px, 0.72fr) minmax(280px, 1.35fr) minmax(84px, 0.28fr);
+  gap: 12px;
   align-items: center;
 }
 
@@ -758,13 +760,13 @@ a {
 }
 
 .account-row-actions {
-  gap: 6px;
+  gap: 8px;
   justify-content: flex-end;
 }
 
 .account-action {
   display: inline-flex;
-  min-width: 66px;
+  min-width: 74px;
   height: 36px;
   align-items: center;
   justify-content: center;
@@ -860,8 +862,13 @@ a {
 
 .threshold-editor {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.threshold-editor .field {
+  grid-template-rows: auto 44px;
 }
 
 :root[data-theme="light"] .select-control,

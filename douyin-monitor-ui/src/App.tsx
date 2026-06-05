@@ -30,8 +30,6 @@ import {
   Server,
   Sun,
   Trash2,
-  ArrowDown,
-  ArrowUp,
   Users,
   Video,
   Zap,
@@ -517,7 +515,6 @@ function App() {
   const [minCollect, setMinCollect] = useState(500)
   const [minComment, setMinComment] = useState(500)
   const [minShare, setMinShare] = useState(500)
-  const [maxAccounts, setMaxAccounts] = useState<'3' | 'all'>('3')
   const [limit, setLimit] = useState(2)
   const [timeout, setTimeoutValue] = useState(18)
   const [includeSeen, setIncludeSeen] = useState(false)
@@ -552,7 +549,7 @@ function App() {
   const providerStatus = getProviderStatus(activeTranscription)
   const parsedRun = useMemo(() => parseRunOutput(lastRun), [lastRun])
   const lastErrors = getLastErrors(data.state)
-  const visibleAccounts = maxAccounts === 'all' ? data.config.accounts : data.config.accounts.slice(0, Number(maxAccounts))
+  const visibleAccounts = data.config.accounts
   const pageRows = activePage === 'lowfan' ? data.latestLowfanRows : activePage === 'accounts' ? data.latestAccountRows : data.latestRows
   const displayRows = lastRun?.rows?.length && resultModeMatchesPage(resultMode, activePage) ? lastRun.rows : pageRows
   const currentPage = pageCopy[activePage]
@@ -624,7 +621,6 @@ function App() {
         method: 'POST',
         body: JSON.stringify({
           limit,
-          maxAccounts,
           includeSeen,
           download: downloadVideo,
           transcribe,
@@ -1110,12 +1106,10 @@ function App() {
               downloadVideo={downloadVideo}
               includeSeen={includeSeen}
               limit={limit}
-              maxAccounts={maxAccounts}
               running={running}
               setDownloadVideo={setDownloadVideo}
               setIncludeSeen={setIncludeSeen}
               setLimit={setLimit}
-              setMaxAccounts={setMaxAccounts}
               setTimeoutValue={setTimeoutValue}
               setTranscribe={setTranscribe}
               accountDrafts={accountDrafts}
@@ -1320,14 +1314,12 @@ function AccountPanel({
   downloadVideo,
   includeSeen,
   limit,
-  maxAccounts,
   running,
   saveAccounts,
   setAccountDrafts,
   setDownloadVideo,
   setIncludeSeen,
   setLimit,
-  setMaxAccounts,
   setTimeoutValue,
   setTranscribe,
   timeout,
@@ -1339,14 +1331,12 @@ function AccountPanel({
   downloadVideo: boolean
   includeSeen: boolean
   limit: number
-  maxAccounts: '3' | 'all'
   running: RunningAction
   saveAccounts: () => void
   setAccountDrafts: (value: AccountDraft[]) => void
   setDownloadVideo: (value: boolean) => void
   setIncludeSeen: (value: boolean) => void
   setLimit: (value: number) => void
-  setMaxAccounts: (value: '3' | 'all') => void
   setTimeoutValue: (value: number) => void
   setTranscribe: (value: boolean) => void
   timeout: number
@@ -1363,32 +1353,12 @@ function AccountPanel({
     setAccountDrafts(next.length ? next : [createEmptyAccountDraft()])
   }
 
-  function moveAccount(id: string, direction: -1 | 1) {
-    const index = accountDrafts.findIndex((account) => account.id === id)
-    const nextIndex = index + direction
-    if (index < 0 || nextIndex < 0 || nextIndex >= accountDrafts.length) return
-    const next = [...accountDrafts]
-    const [item] = next.splice(index, 1)
-    next.splice(nextIndex, 0, item)
-    setAccountDrafts(next)
-  }
-
   return (
     <Card className="control-card account-card page-card">
       <CardContent>
         <PanelTitle icon={ShieldCheck} title="监控批次" />
-        <p className="panel-copy">用于固定跟踪对标账号池；保存后会写入 config.json，下次运行直接沿用。</p>
+        <p className="panel-copy">用于固定跟踪对标账号池；运行时默认使用所有已启用账号，保存后会写入 config.json，下次直接沿用。</p>
         <div className="form-grid account-form">
-          <Field label="账号范围">
-            <Select
-              value={maxAccounts}
-              onChange={(value) => setMaxAccounts(value as '3' | 'all')}
-              options={[
-                { label: '前 3 个', value: '3' },
-                { label: '全部账号', value: 'all' },
-              ]}
-            />
-          </Field>
           <Field label="每账号条数">
             <NumberInput value={limit} min={1} max={10} onChange={setLimit} />
           </Field>
@@ -1409,7 +1379,7 @@ function AccountPanel({
             <span>操作</span>
           </div>
           {accountDrafts.length ? (
-            accountDrafts.map((account, index) => (
+            accountDrafts.map((account) => (
               <div className={account.enabled === false ? 'account-editor-row disabled' : 'account-editor-row'} key={account.id}>
                 <label className="account-enabled">
                   <input type="checkbox" checked={account.enabled !== false} onChange={(event) => updateAccount(account.id, { enabled: event.target.checked })} />
@@ -1418,14 +1388,6 @@ function AccountPanel({
                 <Input value={account.name} onChange={(event) => updateAccount(account.id, { name: event.target.value })} placeholder="例如：AIGC自修室" />
                 <Input value={account.secUserId} onChange={(event) => updateAccount(account.id, { secUserId: event.target.value })} placeholder="例如：MS4wLjABAAAAX7P5NK7HVXt5dPUWL9qoxKqMcHaLM7rkqxQqEK2C7vrgLUJ3c_4wr8H4cTk3ThnN" />
                 <div className="account-row-actions">
-                  <button className="account-action" onClick={() => moveAccount(account.id, -1)} disabled={index === 0} type="button">
-                    <ArrowUp className="size-4" />
-                    上移
-                  </button>
-                  <button className="account-action" onClick={() => moveAccount(account.id, 1)} disabled={index === accountDrafts.length - 1} type="button">
-                    <ArrowDown className="size-4" />
-                    下移
-                  </button>
                   <button className="account-action danger" onClick={() => removeAccount(account.id)} type="button">
                     <Trash2 className="size-4" />
                     移除
@@ -1549,9 +1511,9 @@ function ThresholdPanel({
     <Card className="control-card thresholds-card">
       <CardContent>
         <PanelTitle icon={Gauge} title="监控阈值" />
-        <p className="panel-copy">没有手动设置时使用默认值；保存后会写入 config.json，低粉爆款搜索下次自动沿用。</p>
+        <p className="panel-copy">前五项决定什么内容会进入低粉爆款候选，后三项是搜索默认运行参数；保存后会写入 config.json，下次自动沿用。</p>
         <div className="threshold-editor">
-          <Field label="粉丝上限" help="作者粉丝数低于这个值，才会进入低粉爆款候选。">
+          <Field label="粉丝上限">
             <NumberInput value={fansNum} min={100} max={10000000} step={1000} onChange={setFansNum} />
           </Field>
           <Field label="最低点赞">
