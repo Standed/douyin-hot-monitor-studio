@@ -22,6 +22,7 @@ import {
   MessageSquareText,
   Play,
   Plus,
+  Power,
   Radar,
   RefreshCw,
   Save,
@@ -953,6 +954,7 @@ function App() {
   function navigate(page: PageId) {
     setActivePage(page)
     window.history.pushState(null, '', page === 'overview' ? '/' : `/${page}`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
   }
 
   return (
@@ -1462,7 +1464,6 @@ function AccountPanel({
         </div>
         <div className="account-editor">
           <div className="account-editor-head">
-            <span>状态</span>
             <span>账号名称</span>
             <span>用户 ID</span>
             <span>操作</span>
@@ -1470,16 +1471,26 @@ function AccountPanel({
           {accountDrafts.length ? (
             accountDrafts.map((account) => (
               <div className={account.enabled === false ? 'account-editor-row disabled' : 'account-editor-row'} key={account.id}>
-                <label className="account-enabled">
-                  <input type="checkbox" checked={account.enabled !== false} onChange={(event) => updateAccount(account.id, { enabled: event.target.checked })} />
-                  <span>{account.enabled === false ? '停用' : '启用'}</span>
-                </label>
-                <Input value={account.name} onChange={(event) => updateAccount(account.id, { name: event.target.value })} placeholder="例如：AIGC自修室" />
-                <Input value={account.secUserId} onChange={(event) => updateAccount(account.id, { secUserId: event.target.value })} placeholder="例如：MS4wLjABAAAAX7P5NK7HVXt5dPUWL9qoxKqMcHaLM7rkqxQqEK2C7vrgLUJ3c_4wr8H4cTk3ThnN" />
+                <Input className="account-name-input" value={account.name} onChange={(event) => updateAccount(account.id, { name: event.target.value })} placeholder="例如：AIGC自修室" />
+                <Input
+                  className="account-id-input"
+                  title={account.secUserId}
+                  value={account.secUserId}
+                  onChange={(event) => updateAccount(account.id, { secUserId: event.target.value })}
+                  placeholder="MS4wLjAB..."
+                />
                 <div className="account-row-actions">
-                  <button className="account-action danger" onClick={() => removeAccount(account.id)} type="button">
+                  <button
+                    aria-label={account.enabled === false ? '启用账号' : '停用账号'}
+                    className={account.enabled === false ? 'account-action status' : 'account-action status active'}
+                    onClick={() => updateAccount(account.id, { enabled: account.enabled === false })}
+                    title={account.enabled === false ? '启用账号' : '停用账号'}
+                    type="button"
+                  >
+                    <Power className="size-4" />
+                  </button>
+                  <button aria-label="删除账号" className="account-action danger" onClick={() => removeAccount(account.id)} title="删除账号" type="button">
                     <Trash2 className="size-4" />
-                    移除
                   </button>
                 </div>
               </div>

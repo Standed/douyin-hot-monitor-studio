@@ -812,9 +812,10 @@ a {
 .account-editor-head,
 .account-editor-row {
   display: grid;
-  grid-template-columns: minmax(78px, 0.34fr) minmax(150px, 0.72fr) minmax(280px, 1.35fr) minmax(84px, 0.28fr);
+  grid-template-columns: minmax(128px, 0.72fr) minmax(180px, 1fr) 84px;
   gap: 12px;
   align-items: center;
+  min-width: 0;
 }
 
 .account-editor-head {
@@ -823,42 +824,41 @@ a {
   font-weight: 900;
 }
 
+.account-editor-head span:last-child {
+  text-align: right;
+}
+
 .account-editor-row.disabled {
   opacity: 0.58;
 }
 
-.account-enabled,
+.account-name-input,
+.account-id-input {
+  min-width: 0;
+}
+
+.account-id-input {
+  overflow: hidden;
+  font-family: 'SFMono-Regular', 'JetBrains Mono', monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .account-row-actions {
   display: inline-flex;
   align-items: center;
-}
-
-.account-enabled {
-  gap: 8px;
-  min-height: 44px;
-  color: #91a4bb;
-  font-size: clamp(12px, 0.72vw, 13px);
-  font-weight: 900;
-}
-
-.account-enabled input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
-}
-
-.account-row-actions {
   gap: 8px;
   justify-content: flex-end;
+  min-width: 0;
 }
 
 .account-action {
   display: inline-flex;
-  min-width: 74px;
+  width: 36px;
+  min-width: 36px;
   height: 36px;
   align-items: center;
   justify-content: center;
-  gap: 5px;
   color: #7f90a6;
   background: rgba(148, 163, 184, 0.08);
   border: 1px solid rgba(148, 163, 184, 0.12);
@@ -868,6 +868,12 @@ a {
   font-weight: 900;
   white-space: nowrap;
   transition: 160ms ease;
+}
+
+.account-action.status.active {
+  color: #0fbf93;
+  border-color: rgba(15, 191, 147, 0.22);
+  background: rgba(15, 191, 147, 0.1);
 }
 
 .account-action:hover:not(:disabled) {
