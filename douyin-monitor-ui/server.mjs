@@ -1,6 +1,7 @@
 import cors from 'cors'
 import express from 'express'
 import { execFile } from 'node:child_process'
+import crypto from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -34,6 +35,11 @@ const defaultLowFanConfig = {
 }
 
 const defaultCardMaxRows = 8
+const collaborationFields = new Set(['处理状态', '负责人', '选题价值', '是否已采纳', '备注'])
+const dailyRunState = {
+  running: false,
+  lastDateKey: '',
+}
 
 app.use(cors())
 app.use(express.json())
@@ -429,8 +435,18 @@ function feishuBaseSettings(envValues = {}) {
   const appSecret = process.env.FEISHU_BASE_APP_SECRET || envValues.FEISHU_BASE_APP_SECRET || process.env.LARK_APP_SECRET || envValues.LARK_APP_SECRET || ''
   const baseToken = process.env.FEISHU_BASE_APP_TOKEN || envValues.FEISHU_BASE_APP_TOKEN || process.env.FEISHU_BASE_TOKEN || envValues.FEISHU_BASE_TOKEN || ''
   const tableId = process.env.FEISHU_BASE_TABLE_ID || envValues.FEISHU_BASE_TABLE_ID || ''
+  const syncMode = String(process.env.FEISHU_BASE_SYNC_MODE || envValues.FEISHU_BASE_SYNC_MODE || 'auto').trim().toLowerCase()
+  const larkCliProfile = process.env.FEISHU_BASE_LARK_PROFILE || envValues.FEISHU_BASE_LARK_PROFILE || 'xiyangshi-company'
+  const larkCliAs = process.env.FEISHU_BASE_LARK_AS || envValues.FEISHU_BASE_LARK_AS || 'user'
+  const larkCliBin = process.env.FEISHU_BASE_LARK_CLI || envValues.FEISHU_BASE_LARK_CLI || 'lark-cli'
+  const openApiConfigured = Boolean(appId && appSecret)
   return {
-    configured: Boolean(appId && appSecret && baseToken && tableId),
+    configured: Boolean(baseToken && tableId && (openApiConfigured || syncMode === 'auto' || syncMode === 'lark-cli')),
+    openApiConfigured,
+    syncMode,
+    larkCliProfile,
+    larkCliAs,
+    larkCliBin,
     appId,
     appSecret,
     baseToken,
@@ -443,6 +459,41 @@ function safeIsoDateTime(value = new Date()) {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(+date)) return new Date().toISOString()
   return date.toISOString()
+}
+
+function safeLocalDateTime(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value)
+  const normalized = Number.isNaN(+date) ? new Date() : date
+  const pad = (number) => String(number).padStart(2, '0')
+  return [
+    `${normalized.getFullYear()}-${pad(normalized.getMonth() + 1)}-${pad(normalized.getDate())}`,
+    `${pad(normalized.getHours())}:${pad(normalized.getMinutes())}:${pad(normalized.getSeconds())}`,
+  ].join(' ')
+}
+
+function hashText(value) {
+  return crypto.createHash('sha1').update(String(value || '')).digest('hex').slice(0, 16)
+}
+
+function normalizeUrlKey(value) {
+  const text = String(value || '').trim()
+  if (!text) return ''
+  try {
+    const url = new URL(text)
+    url.search = ''
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return text.split('?')[0]
+  }
+}
+
+function dedupeKeyForRow(kind, row = {}) {
+  const type = kind === 'lowfan' ? 'lowfan' : 'account'
+  if (row.video_id) return `${type}:video:${row.video_id}`
+  const urlKey = normalizeUrlKey(row.url)
+  if (urlKey) return `${type}:url:${hashText(urlKey)}`
+  return `${type}:fallback:${hashText([row.title, row.author, row.source_account, row.create_time].join('|'))}`
 }
 
 function reportRunId(reports = {}) {
@@ -466,10 +517,11 @@ async function feishuTenantAccessToken(settings) {
   return payload.tenant_access_token
 }
 
-function feishuRecordFields(kind, result, row, index, envValues = {}) {
+function feishuRecordFields(kind, result, row, index, envValues = {}, options = {}) {
   const reports = result.parsed?.reports || {}
   const runId = reportRunId(reports)
-  return {
+  const fields = {
+    去重键: dedupeKeyForRow(kind, row),
     运行ID: runId,
     运行类型: kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控',
     本次序号: index + 1,
@@ -496,8 +548,150 @@ function feishuRecordFields(kind, result, row, index, envValues = {}) {
     SRT字幕: assetLink(row.srt_path, envValues) || row.srt_path || '',
     Markdown报告: reportLink(reports.md, envValues) || reportFileName(reports.md),
     CSV报告: reportLink(reports.csv, envValues) || reportFileName(reports.csv),
-    同步时间: safeIsoDateTime(),
+    同步时间: safeLocalDateTime(),
   }
+  if (options.includeCollaborationDefaults) {
+    fields.处理状态 = '待处理'
+    fields.选题价值 = '待评估'
+    fields.是否已采纳 = false
+  }
+  return fields
+}
+
+function fieldsWithoutCollaboration(fields) {
+  return Object.fromEntries(Object.entries(fields).filter(([field]) => !collaborationFields.has(field)))
+}
+
+function parseJsonFromCliOutput(output) {
+  const text = String(output || '')
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0) return {}
+  return JSON.parse(text.slice(start, end + 1))
+}
+
+function runLarkCli(settings, args, timeout = 45000) {
+  return new Promise((resolve, reject) => {
+    execFile(settings.larkCliBin, args, { timeout, maxBuffer: 1024 * 1024 * 4 }, (error, stdout, stderr) => {
+      const output = `${stdout || ''}\n${stderr || ''}`.trim()
+      if (error) {
+        reject(new Error(output || error.message))
+        return
+      }
+      resolve(parseJsonFromCliOutput(output))
+    })
+  })
+}
+
+async function larkCliFindRecord(settings, dedupeKey) {
+  const payload = {
+    keyword: dedupeKey,
+    search_fields: ['去重键'],
+    select_fields: ['去重键'],
+    limit: 10,
+  }
+  const response = await runLarkCli(settings, [
+    'base',
+    '+record-search',
+    '--profile',
+    settings.larkCliProfile,
+    '--as',
+    settings.larkCliAs,
+    '--base-token',
+    settings.baseToken,
+    '--table-id',
+    settings.tableId,
+    '--json',
+    JSON.stringify(payload),
+    '--format',
+    'json',
+  ])
+  const recordIds = response?.data?.record_id_list || []
+  return recordIds[0] || ''
+}
+
+async function larkCliUpsertRecord(settings, createFields, updateFields) {
+  const recordId = await larkCliFindRecord(settings, createFields.去重键)
+  const args = [
+    'base',
+    '+record-upsert',
+    '--profile',
+    settings.larkCliProfile,
+    '--as',
+    settings.larkCliAs,
+    '--base-token',
+    settings.baseToken,
+    '--table-id',
+    settings.tableId,
+    '--json',
+    JSON.stringify(recordId ? updateFields : createFields),
+  ]
+  if (recordId) args.splice(args.length - 2, 0, '--record-id', recordId)
+  const response = await runLarkCli(settings, args)
+  return {
+    recordId: response?.data?.record?.record_id || recordId,
+    created: Boolean(response?.data?.created || !recordId),
+    updated: Boolean(response?.data?.updated || recordId),
+  }
+}
+
+async function feishuApi(settings, token, pathName, options = {}) {
+  const response = await fetch(`https://open.feishu.cn/open-apis${pathName}`, {
+    method: options.method || 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok || payload.code !== 0) {
+    throw new Error(payload.msg || `Feishu API HTTP ${response.status}`)
+  }
+  return payload
+}
+
+async function openApiFindRecord(settings, token, dedupeKey) {
+  const payload = await feishuApi(
+    settings,
+    token,
+    `/bitable/v1/apps/${settings.baseToken}/tables/${settings.tableId}/records/search?page_size=10`,
+    {
+      method: 'POST',
+      body: {
+        field_names: ['去重键'],
+        filter: {
+          conjunction: 'and',
+          conditions: [
+            {
+              field_name: '去重键',
+              operator: 'is',
+              value: [dedupeKey],
+            },
+          ],
+        },
+      },
+    },
+  )
+  const items = payload?.data?.items || []
+  const exact = items.find((item) => String(item?.fields?.去重键 || '') === dedupeKey)
+  return exact?.record_id || ''
+}
+
+async function openApiUpsertRecord(settings, token, createFields, updateFields) {
+  const recordId = await openApiFindRecord(settings, token, createFields.去重键)
+  if (recordId) {
+    const payload = await feishuApi(settings, token, `/bitable/v1/apps/${settings.baseToken}/tables/${settings.tableId}/records/${recordId}`, {
+      method: 'PUT',
+      body: { fields: updateFields },
+    })
+    return { recordId: payload?.data?.record?.record_id || recordId, created: false, updated: true }
+  }
+  const payload = await feishuApi(settings, token, `/bitable/v1/apps/${settings.baseToken}/tables/${settings.tableId}/records`, {
+    method: 'POST',
+    body: { fields: createFields },
+  })
+  return { recordId: payload?.data?.record?.record_id || '', created: true, updated: false }
 }
 
 async function syncRunToFeishuBase(kind, result, envValues = {}) {
@@ -511,26 +705,26 @@ async function syncRunToFeishuBase(kind, result, envValues = {}) {
   }
 
   try {
-    const token = await feishuTenantAccessToken(settings)
-    const records = rows.slice(0, 200).map((row, index) => ({
-      fields: feishuRecordFields(kind, result, row, index, envValues),
-    }))
-    const response = await fetch(`https://open.feishu.cn/open-apis/bitable/v1/apps/${settings.baseToken}/tables/${settings.tableId}/records/batch_create`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ records }),
-    })
-    const payload = await response.json().catch(() => ({}))
-    if (!response.ok || payload.code !== 0) {
-      throw new Error(payload.msg || `bitable batch_create HTTP ${response.status}`)
+    const useOpenApi = settings.syncMode === 'openapi' || (settings.syncMode === 'auto' && settings.openApiConfigured)
+    const token = useOpenApi ? await feishuTenantAccessToken(settings) : ''
+    let created = 0
+    let updated = 0
+    for (const [index, row] of rows.slice(0, 200).entries()) {
+      const createFields = feishuRecordFields(kind, result, row, index, envValues, { includeCollaborationDefaults: true })
+      const updateFields = fieldsWithoutCollaboration(createFields)
+      const status = useOpenApi
+        ? await openApiUpsertRecord(settings, token, createFields, updateFields)
+        : await larkCliUpsertRecord(settings, createFields, updateFields)
+      if (status.created) created += 1
+      if (status.updated) updated += 1
     }
     return {
       configured: true,
       synced: true,
-      count: records.length,
+      mode: useOpenApi ? 'openapi' : 'lark-cli',
+      count: created + updated,
+      created,
+      updated,
       baseUrl: settings.baseUrl,
     }
   } catch (error) {
@@ -538,6 +732,8 @@ async function syncRunToFeishuBase(kind, result, envValues = {}) {
       configured: true,
       synced: false,
       count: 0,
+      created: 0,
+      updated: 0,
       baseUrl: settings.baseUrl,
       error: error instanceof Error ? error.message : String(error),
     }
@@ -653,7 +849,7 @@ function runSummaryMarkdown(kind, result, reports, envValues) {
     summary.push('提示：配置 DY_HOT_PUBLIC_URL 或 FEISHU_REPORT_BASE_URL 后，群卡片会出现可点击报告按钮。')
   }
   if (baseSync.configured && baseSync.synced) {
-    summary.push(`**飞书多维表格**：已同步 ${baseSync.count || 0} 条`)
+    summary.push(`**飞书多维表格**：已同步 ${baseSync.count || 0} 条（新增 ${baseSync.created || 0} / 更新 ${baseSync.updated || 0}）`)
   } else if (baseSync.configured && !baseSync.synced) {
     summary.push(`**飞书多维表格**：同步失败，${cleanCardText(truncateText(baseSync.error || '请检查 Base 配置和字段结构', 80))}`)
   } else {
@@ -784,6 +980,266 @@ async function finalizeRun(kind, result) {
   return { ...enriched, notification: await notifyRun(kind, enriched) }
 }
 
+function booleanEnv(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback
+  return ['1', 'true', 'yes', 'on', '开启', '启用'].includes(String(value).trim().toLowerCase())
+}
+
+function dailyRunSettings(envValues = {}, overrides = {}) {
+  const rawTime = String(overrides.time || process.env.DY_HOT_DAILY_RUN_TIME || envValues.DY_HOT_DAILY_RUN_TIME || '09:30').trim()
+  const time = /^\d{2}:\d{2}$/.test(rawTime) ? rawTime : '09:30'
+  return {
+    enabled: overrides.enabled === undefined ? booleanEnv(process.env.DY_HOT_DAILY_RUN_ENABLED || envValues.DY_HOT_DAILY_RUN_ENABLED, false) : Boolean(overrides.enabled),
+    time,
+    keyword: String(overrides.keyword || process.env.DY_HOT_DAILY_KEYWORD || envValues.DY_HOT_DAILY_KEYWORD || 'AI智能体').trim() || 'AI智能体',
+    publishTime: String(overrides.publishTime || process.env.DY_HOT_DAILY_PUBLISH_TIME || envValues.DY_HOT_DAILY_PUBLISH_TIME || '最近一周').trim() || '最近一周',
+    duration: String(overrides.duration || process.env.DY_HOT_DAILY_DURATION || envValues.DY_HOT_DAILY_DURATION || '不限').trim() || '不限',
+    sort: String(overrides.sort || process.env.DY_HOT_DAILY_SORT || envValues.DY_HOT_DAILY_SORT || '最多点赞').trim() || '最多点赞',
+    pages: boundedNumber(overrides.pages ?? process.env.DY_HOT_DAILY_PAGES ?? envValues.DY_HOT_DAILY_PAGES, 2, 1, 10),
+    count: boundedNumber(overrides.count ?? process.env.DY_HOT_DAILY_COUNT ?? envValues.DY_HOT_DAILY_COUNT, 20, 5, 50),
+    accountLimit: boundedNumber(overrides.accountLimit ?? process.env.DY_HOT_DAILY_ACCOUNT_LIMIT ?? envValues.DY_HOT_DAILY_ACCOUNT_LIMIT, 2, 1, 50),
+    accountTimeout: boundedNumber(overrides.accountTimeout ?? process.env.DY_HOT_DAILY_ACCOUNT_TIMEOUT ?? envValues.DY_HOT_DAILY_ACCOUNT_TIMEOUT, 30, 5, 180),
+    maxAccounts: overrides.maxAccounts || process.env.DY_HOT_DAILY_MAX_ACCOUNTS || envValues.DY_HOT_DAILY_MAX_ACCOUNTS || 'all',
+    download: overrides.download === undefined ? booleanEnv(process.env.DY_HOT_DAILY_DOWNLOAD_VIDEO || envValues.DY_HOT_DAILY_DOWNLOAD_VIDEO, false) : Boolean(overrides.download),
+    transcribe: overrides.transcribe === undefined ? booleanEnv(process.env.DY_HOT_DAILY_TRANSCRIBE || envValues.DY_HOT_DAILY_TRANSCRIBE, false) : Boolean(overrides.transcribe),
+  }
+}
+
+function localDateKey(date = new Date()) {
+  const pad = (number) => String(number).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function timeMatchesDailyTarget(now, time) {
+  const [hour, minute] = time.split(':').map((part) => Number(part))
+  return now.getHours() === hour && now.getMinutes() === minute
+}
+
+function rankedRows(results) {
+  return results
+    .flatMap((entry) => (Array.isArray(entry.result?.rows) ? entry.result.rows.map((row) => ({ ...row, _kind: entry.kind })) : []))
+    .sort((a, b) => {
+      const scoreA = Number(a.viral_score || 0) || Number(a.share_count || 0) + Number(a.collect_count || 0)
+      const scoreB = Number(b.viral_score || 0) || Number(b.share_count || 0) + Number(b.collect_count || 0)
+      return scoreB - scoreA
+    })
+}
+
+function collectDailyErrors(results) {
+  return results.flatMap((entry) => {
+    const errors = Array.isArray(entry.result?.parsed?.errors) ? entry.result.parsed.errors : []
+    return errors.map((error) => ({
+      kind: entry.kind,
+      account: error.account || error.route || '未知来源',
+      error: error.error || '运行异常',
+    }))
+  })
+}
+
+function dailySummaryMarkdown(summary, envValues) {
+  const lines = [
+    `**今日新增**：${summary.createdCount} 条`,
+    `**本次命中**：低粉爆款 ${summary.lowfanRows} 条 / 对标账号 ${summary.accountRows} 条`,
+    `**入库状态**：新增 ${summary.createdCount} / 更新 ${summary.updatedCount}`,
+  ]
+  if (summary.errors.length) {
+    lines.push(`**异常账号/线路**：${summary.errors.slice(0, 5).map((entry) => `${entry.account}：${truncateText(entry.error, 60)}`).join('\n')}`)
+  } else {
+    lines.push('**异常账号/线路**：暂无')
+  }
+  const baseUrl = feishuBaseSettings(envValues).baseUrl
+  if (baseUrl) lines.push(`**结果库**：[打开 DY HOT 抖音监控结果库](${baseUrl})`)
+  return lines.join('\n')
+}
+
+async function sendDailyNotification(summary, webhook, envValues = {}) {
+  if (!webhook) return { configured: false, sent: false }
+  const topRows = summary.topRows.slice(0, 5)
+  const elements = [
+    {
+      tag: 'markdown',
+      content: dailySummaryMarkdown(summary, envValues),
+    },
+  ]
+  if (topRows.length) {
+    elements.push({ tag: 'hr' })
+    for (const [index, row] of topRows.entries()) {
+      elements.push({
+        tag: 'markdown',
+        content: runCardRow(row, index + 1),
+      })
+    }
+  }
+  const actions = []
+  const baseUrl = feishuBaseSettings(envValues).baseUrl
+  if (baseUrl) {
+    actions.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '打开结果库' },
+      url: baseUrl,
+      type: 'primary',
+    })
+  }
+  const firstReport = summary.reports.find((report) => report.mdUrl)
+  if (firstReport?.mdUrl) {
+    actions.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '打开最新报告' },
+      url: firstReport.mdUrl,
+      type: 'default',
+    })
+  }
+  if (actions.length) elements.push({ tag: 'action', actions: actions.slice(0, 3) })
+  elements.push({
+    tag: 'note',
+    elements: [{ tag: 'plain_text', content: `日报时间：${new Date().toLocaleString('zh-CN', { hour12: false })}` }],
+  })
+
+  const response = await fetch(webhook, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      msg_type: 'interactive',
+      card: {
+        config: { wide_screen_mode: true, enable_forward: true },
+        header: {
+          template: summary.errors.length ? 'orange' : 'green',
+          title: { tag: 'plain_text', content: 'DY HOT 每日监控日报' },
+        },
+        elements,
+      },
+    }),
+  })
+  if (!response.ok) throw new Error(`Feishu webhook HTTP ${response.status}`)
+  return { configured: true, sent: true }
+}
+
+function resultReportLinks(result, envValues) {
+  const reports = result.parsed?.reports || {}
+  return {
+    mdUrl: reportLink(reports.md, envValues),
+    csvUrl: reportLink(reports.csv, envValues),
+  }
+}
+
+async function runDailyMonitor(reason = 'manual', overrides = {}) {
+  if (dailyRunState.running) {
+    return { ok: false, running: true, reason, error: '每日监控正在运行中' }
+  }
+  dailyRunState.running = true
+  try {
+    const envValues = await readLocalEnvValues()
+    const settings = dailyRunSettings(envValues, overrides)
+    const config = await readJson(configPath, {})
+    const lowFanConfig = normalizeLowFanConfig(config.low_fan_hits)
+    const results = []
+
+    const lowfanResult = await runMonitorWithRows([
+      'lowfan-search',
+      settings.keyword,
+      '--publish-time',
+      settings.publishTime,
+      '--duration',
+      settings.duration,
+      '--sort',
+      settings.sort,
+      '--route',
+      String(lowFanConfig.route),
+      '--pages',
+      String(settings.pages),
+      '--count',
+      String(settings.count),
+      '--fallback-route',
+    ])
+    const lowfanBaseSync = await syncRunToFeishuBase('lowfan', lowfanResult, envValues)
+    results.push({ kind: 'lowfan', result: { ...lowfanResult, baseSync: lowfanBaseSync } })
+
+    const accountMonitor = config.account_monitor || {}
+    const accounts = enabledAccounts(config)
+    if (accounts.length) {
+      const runConfig = {
+        ...config,
+        account_monitor: {
+          ...accountMonitor,
+          accounts,
+        },
+      }
+      const runConfigPath = path.join(monitorDir, '.tmp-daily-account-run.config.json')
+      await saveJson(runConfigPath, runConfig)
+      try {
+        const accountArgs = [
+          '--config',
+          runConfigPath,
+          'account-run',
+          '--limit',
+          String(settings.accountLimit),
+          '--timeout',
+          String(settings.accountTimeout),
+        ]
+        if (settings.maxAccounts && settings.maxAccounts !== 'all') {
+          accountArgs.push('--max-accounts', String(asPositiveNumber(settings.maxAccounts, 3)))
+        }
+        if (settings.download) accountArgs.push('--download')
+        if (settings.transcribe) accountArgs.push('--transcribe')
+        const accountResult = await runMonitorWithRows(accountArgs)
+        const accountBaseSync = await syncRunToFeishuBase('account', accountResult, envValues)
+        results.push({ kind: 'account', result: { ...accountResult, baseSync: accountBaseSync } })
+      } finally {
+        await fs.rm(runConfigPath, { force: true })
+      }
+    }
+
+    const summary = {
+      ok: results.every((entry) => entry.result.ok || (Array.isArray(entry.result.rows) && entry.result.rows.length)),
+      reason,
+      date: localDateKey(),
+      lowfanRows: results.find((entry) => entry.kind === 'lowfan')?.result.rows?.length || 0,
+      accountRows: results.find((entry) => entry.kind === 'account')?.result.rows?.length || 0,
+      createdCount: results.reduce((sum, entry) => sum + (entry.result.baseSync?.created || 0), 0),
+      updatedCount: results.reduce((sum, entry) => sum + (entry.result.baseSync?.updated || 0), 0),
+      topRows: rankedRows(results),
+      errors: collectDailyErrors(results),
+      reports: results.map((entry) => resultReportLinks(entry.result, envValues)),
+      baseSync: results.map((entry) => ({ kind: entry.kind, ...entry.result.baseSync })),
+    }
+
+    const webhook = process.env.FEISHU_DAILY_WEBHOOK || envValues.FEISHU_DAILY_WEBHOOK || process.env.FEISHU_RUN_WEBHOOK || envValues.FEISHU_RUN_WEBHOOK || process.env.FEISHU_FEEDBACK_WEBHOOK || envValues.FEISHU_FEEDBACK_WEBHOOK || ''
+    try {
+      summary.notification = await sendDailyNotification(summary, webhook, envValues)
+    } catch (error) {
+      summary.notification = {
+        configured: Boolean(webhook),
+        sent: false,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+    return summary
+  } finally {
+    dailyRunState.running = false
+  }
+}
+
+async function maybeRunDailySchedule() {
+  const envValues = await readLocalEnvValues()
+  const settings = dailyRunSettings(envValues)
+  if (!settings.enabled) return
+  const now = new Date()
+  const today = localDateKey(now)
+  if (dailyRunState.lastDateKey === today || !timeMatchesDailyTarget(now, settings.time)) return
+  dailyRunState.lastDateKey = today
+  runDailyMonitor('schedule').catch((error) => {
+    console.error('DY HOT daily run failed:', error instanceof Error ? error.message : String(error))
+  })
+}
+
+function startDailyScheduler() {
+  setInterval(() => {
+    maybeRunDailySchedule().catch((error) => {
+      console.error('DY HOT daily scheduler failed:', error instanceof Error ? error.message : String(error))
+    })
+  }, 60 * 1000)
+}
+
 async function settingsStatus(config = null) {
   const envValues = await readLocalEnvValues()
   const cfg = config || await readJson(configPath, {})
@@ -834,6 +1290,7 @@ async function settingsStatus(config = null) {
       configured: feishuBaseSettings(envValues).configured,
       baseUrl: feishuBaseSettings(envValues).baseUrl,
     },
+    dailyRun: dailyRunSettings(envValues),
   }
 }
 
@@ -1154,6 +1611,10 @@ app.post('/api/run/lowfan', async (req, res) => {
   res.json(await finalizeRun('lowfan', result))
 })
 
+app.post('/api/run/daily', async (req, res) => {
+  res.json(await runDailyMonitor('manual', req.body || {}))
+})
+
 app.post('/api/settings/douyin-session', async (req, res) => {
   const sessionid = String(req.body?.sessionid || '').trim()
   if (!/^[A-Za-z0-9]{24,128}$/.test(sessionid)) {
@@ -1183,6 +1644,7 @@ app.use('/assets', express.static(path.join(__dirname, 'dist')))
 
 await loadLocalEnv()
 refreshRuntimeConfig()
+startDailyScheduler()
 
 app.listen(port, host, () => {
   console.log(`Douyin monitor API listening on http://${host}:${port}`)

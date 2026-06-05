@@ -399,7 +399,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!response.ok) {
     const text = await response.text()
-    let message = text
+    let message
     try {
       const payload = JSON.parse(text) as { error?: string; stderr?: string }
       message = payload.error || payload.stderr || text
