@@ -204,6 +204,28 @@ function normalizeLowFanConfig(value = {}) {
   }
 }
 
+function normalizeAccountMonitorConfig(value = {}, current = {}) {
+  const incomingAccounts = Array.isArray(value.accounts) ? value.accounts : current.accounts || []
+  const accounts = []
+
+  for (const account of incomingAccounts) {
+    const name = String(account?.name || '').trim()
+    const secUserId = String(account?.secUserId || account?.sec_user_id || '').trim()
+    if (!name && !secUserId) continue
+    if (!name || !secUserId) {
+      return { error: '账号名称和 sec_user_id 都要填写；空白行可以直接留空。' }
+    }
+    accounts.push({ name, sec_user_id: secUserId })
+  }
+
+  return {
+    count_per_account: boundedNumber(value.countPerAccount ?? current.count_per_account, 2, 1, 50),
+    download_video: Boolean(value.downloadVideo ?? current.download_video),
+    transcribe: Boolean(value.transcribe ?? current.transcribe),
+    accounts,
+  }
+}
+
 function runMonitor(args) {
   return new Promise((resolve) => {
     const command = `${python} ${monitorScript} ${args.join(' ')}`
@@ -383,6 +405,8 @@ app.get('/api/dashboard', async (_req, res) => {
       accountCount: config.account_monitor?.accounts?.length || 0,
       accounts: summarizeAccounts(config),
       countPerAccount: config.account_monitor?.count_per_account || 2,
+      downloadVideo: Boolean(config.account_monitor?.download_video),
+      transcribe: Boolean(config.account_monitor?.transcribe),
       outputDir,
       thresholds: {
         fans_num: lowFanConfig.fans_num,
@@ -504,6 +528,33 @@ app.post('/api/settings/thresholds', async (req, res) => {
       count: next.count,
       pages: next.max_pages,
       route: next.route,
+    },
+  })
+})
+
+app.post('/api/settings/accounts', async (req, res) => {
+  const config = await readJson(configPath, {})
+  const current = config.account_monitor || {}
+  const next = normalizeAccountMonitorConfig(req.body || {}, current)
+  if (next.error) {
+    res.status(400).json({ ok: false, error: next.error })
+    return
+  }
+
+  config.account_monitor = {
+    ...current,
+    ...next,
+  }
+  await saveJson(configPath, config)
+
+  res.json({
+    ok: true,
+    accountMonitor: {
+      accountCount: config.account_monitor.accounts.length,
+      accounts: summarizeAccounts(config),
+      countPerAccount: config.account_monitor.count_per_account,
+      downloadVideo: config.account_monitor.download_video,
+      transcribe: config.account_monitor.transcribe,
     },
   })
 })

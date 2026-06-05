@@ -102,16 +102,17 @@ cp douyin-monitor/config.example.json douyin-monitor/config.json
 
 2. 编辑 `douyin-monitor-ui/.env.local`，至少填 `TIKHUB_API_KEY`。需要云端转写再填 `LEMONFOX_API_KEY`。
 
-3. 编辑 `douyin-monitor/config.json`，把 `account_monitor.accounts` 换成你的对标账号：
+3. 启动本项目：
 
-```json
-{
-  "name": "example account",
-  "sec_user_id": "replace_with_douyin_sec_user_id"
-}
+```bash
+docker compose up -d --build
 ```
 
-4. 启动本项目：
+4. 打开前端，在“对标账号”页面添加账号名称和 `sec_user_id`，并保存账号配置。保存后会写入 `douyin-monitor/config.json`，下次运行直接沿用。
+
+如果不启动前端，也可以把 `douyin-monitor/config.example.json` 复制成 `douyin-monitor/config.json` 后手工编辑；这只是开发兜底，不是推荐入口。
+
+5. 后续重启：
 
 ```bash
 docker compose up -d --build
@@ -121,6 +122,12 @@ docker compose up -d --build
 
 ```text
 http://127.0.0.1:5174/
+```
+
+对标账号配置页：
+
+```text
+http://127.0.0.1:5174/accounts
 ```
 
 控制 API：
@@ -205,6 +212,8 @@ python3 douyin_monitor.py lowfan-search "AI智能体" --publish-time 最近一�
 ```bash
 python3 douyin_monitor.py account-run --limit 2 --max-accounts 3 --include-seen
 ```
+
+账号池优先在前端“对标账号”页面维护；CLI 会读取同一个 `douyin-monitor/config.json`。
 
 本地解析服务健康检查：
 

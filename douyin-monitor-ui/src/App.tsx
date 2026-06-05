@@ -20,13 +20,16 @@ import {
   LogIn,
   Moon,
   Play,
+  Plus,
   RefreshCw,
+  Save,
   Search,
   Settings2,
   ShieldCheck,
   Sparkles,
   Server,
   Sun,
+  Trash2,
   Users,
   Video,
   Zap,
@@ -49,6 +52,12 @@ type ServiceStatus = {
 
 type AccountSummary = {
   index: number
+  name: string
+  secUserId: string
+}
+
+type AccountDraft = {
+  id: string
   name: string
   secUserId: string
 }
@@ -95,12 +104,14 @@ type ThresholdSettings = {
   defaultLowFan: ConfigSummary['defaultLowFan']
 }
 
-type RunningAction = 'account' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | null
+type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | null
 
 type ConfigSummary = {
   accountCount: number
   accounts: AccountSummary[]
   countPerAccount: number
+  downloadVideo: boolean
+  transcribe: boolean
   outputDir: string
   thresholds: {
     fans_num: number
@@ -188,6 +199,8 @@ const defaultData: DashboardData = {
     accountCount: 0,
     accounts: [],
     countPerAccount: 2,
+    downloadVideo: false,
+    transcribe: false,
     outputDir: '',
     thresholds: {
       fans_num: 10000,
@@ -403,6 +416,22 @@ function resultModeMatchesPage(mode: 'latest' | 'lowfan' | 'account', page: Page
   return false
 }
 
+function accountsToDrafts(accounts: AccountSummary[]): AccountDraft[] {
+  return accounts.map((account) => ({
+    id: `${account.index}-${account.secUserId || account.name}`,
+    name: account.name || '',
+    secUserId: account.secUserId || '',
+  }))
+}
+
+function createEmptyAccountDraft(): AccountDraft {
+  return {
+    id: `new-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    name: '',
+    secUserId: '',
+  }
+}
+
 function normalizeIntegrations(config: ConfigSummary): NonNullable<ConfigSummary['integrations']> {
   const fallback = defaultData.config.integrations!
   const incoming = config.integrations
@@ -446,6 +475,7 @@ function App() {
   const [includeSeen, setIncludeSeen] = useState(false)
   const [downloadVideo, setDownloadVideo] = useState(false)
   const [transcribe, setTranscribe] = useState(false)
+  const [accountDrafts, setAccountDrafts] = useState<AccountDraft[]>([])
   const [sessionid, setSessionid] = useState('')
   const [tikhubKey, setTikhubKey] = useState('')
   const [lemonfoxKey, setLemonfoxKey] = useState('')
@@ -495,10 +525,42 @@ function App() {
         },
       ]
 
+  function syncDashboardForm(dashboard: DashboardData) {
+    setCount(dashboard.config.defaultLowFan.count || 20)
+    setPages(dashboard.config.defaultLowFan.pages || 1)
+    setRoute(String(dashboard.config.defaultLowFan.route || 1))
+    setFansNum(dashboard.config.thresholds.fans_num || 10000)
+    setMinLikes(dashboard.config.thresholds.likes || 1000)
+    setMinCollect(dashboard.config.thresholds.collect || 500)
+    setMinComment(dashboard.config.thresholds.comment || 500)
+    setMinShare(dashboard.config.thresholds.share || 500)
+    setLimit(dashboard.config.countPerAccount || 2)
+    setDownloadVideo(Boolean(dashboard.config.downloadVideo))
+    setTranscribe(Boolean(dashboard.config.transcribe))
+    setAccountDrafts(accountsToDrafts(dashboard.config.accounts))
+    if (dashboard.config.integrations?.transcription) {
+      const settings = dashboard.config.integrations.transcription
+      setTranscriptionProvider(settings.provider || 'faster-whisper')
+      setTranscriptionLanguage(settings.language || 'zh')
+      setLocalModel(settings.localModel || 'small')
+      setLocalDevice(settings.localDevice || 'auto')
+      setLocalComputeType(settings.localComputeType || 'int8')
+      setTranscriptionPrompt(settings.prompt || '请使用标点符号：，。、；：？！')
+    }
+    if (dashboard.config.integrations?.runtime) {
+      const runtime = dashboard.config.integrations.runtime
+      setLocalApiBase(runtime.localApiBase || '')
+      setPythonBin(runtime.pythonBin || '')
+      setMonitorDir(runtime.monitorDir || '')
+    }
+  }
+
   async function refresh() {
     setLoading(true)
     try {
-      setData(await api<DashboardData>('/api/dashboard'))
+      const dashboard = await api<DashboardData>('/api/dashboard')
+      setData(dashboard)
+      syncDashboardForm(dashboard)
     } finally {
       setLoading(false)
     }
@@ -701,6 +763,47 @@ function App() {
     }
   }
 
+  async function saveAccounts() {
+    setRunning('accounts')
+    try {
+      const result = await api<{
+        ok: boolean
+        accountMonitor: Pick<ConfigSummary, 'accountCount' | 'accounts' | 'countPerAccount' | 'downloadVideo' | 'transcribe'>
+        error?: string
+      }>('/api/settings/accounts', {
+        method: 'POST',
+        body: JSON.stringify({
+          countPerAccount: limit,
+          downloadVideo,
+          transcribe,
+          accounts: accountDrafts,
+        }),
+      })
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/settings/accounts',
+        code: result.ok ? 0 : 1,
+        stdout: '对标账号配置已保存',
+        stderr: result.error || '',
+      })
+      setData((current) => ({
+        ...current,
+        config: {
+          ...current.config,
+          ...result.accountMonitor,
+        },
+      }))
+      setAccountDrafts(accountsToDrafts(result.accountMonitor.accounts))
+      setLimit(result.accountMonitor.countPerAccount)
+      setDownloadVideo(result.accountMonitor.downloadVideo)
+      setTranscribe(result.accountMonitor.transcribe)
+    } catch (error) {
+      setLastRun(createRunError('POST /api/settings/accounts', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
 
@@ -709,30 +812,7 @@ function App() {
         if (cancelled) return
         startTransition(() => {
           setData(dashboard)
-          setCount(dashboard.config.defaultLowFan.count || 20)
-          setPages(dashboard.config.defaultLowFan.pages || 1)
-          setRoute(String(dashboard.config.defaultLowFan.route || 1))
-          setFansNum(dashboard.config.thresholds.fans_num || 10000)
-          setMinLikes(dashboard.config.thresholds.likes || 1000)
-          setMinCollect(dashboard.config.thresholds.collect || 500)
-          setMinComment(dashboard.config.thresholds.comment || 500)
-          setMinShare(dashboard.config.thresholds.share || 500)
-          setLimit(dashboard.config.countPerAccount || 2)
-          if (dashboard.config.integrations?.transcription) {
-            const settings = dashboard.config.integrations.transcription
-            setTranscriptionProvider(settings.provider || 'faster-whisper')
-            setTranscriptionLanguage(settings.language || 'zh')
-            setLocalModel(settings.localModel || 'small')
-            setLocalDevice(settings.localDevice || 'auto')
-            setLocalComputeType(settings.localComputeType || 'int8')
-            setTranscriptionPrompt(settings.prompt || '请使用标点符号：，。、；：？！')
-          }
-          if (dashboard.config.integrations?.runtime) {
-            const runtime = dashboard.config.integrations.runtime
-            setLocalApiBase(runtime.localApiBase || '')
-            setPythonBin(runtime.pythonBin || '')
-            setMonitorDir(runtime.monitorDir || '')
-          }
+          syncDashboardForm(dashboard)
           setLoading(false)
         })
       })
@@ -918,6 +998,9 @@ function App() {
               setMaxAccounts={setMaxAccounts}
               setTimeoutValue={setTimeoutValue}
               setTranscribe={setTranscribe}
+              accountDrafts={accountDrafts}
+              saveAccounts={saveAccounts}
+              setAccountDrafts={setAccountDrafts}
               timeout={timeout}
               transcribe={transcribe}
               visibleAccounts={visibleAccounts}
@@ -1104,11 +1187,14 @@ function LowfanPanel({
 }
 
 function AccountPanel({
+  accountDrafts,
   downloadVideo,
   includeSeen,
   limit,
   maxAccounts,
   running,
+  saveAccounts,
+  setAccountDrafts,
   setDownloadVideo,
   setIncludeSeen,
   setLimit,
@@ -1120,11 +1206,14 @@ function AccountPanel({
   visibleAccounts,
   onRun,
 }: {
+  accountDrafts: AccountDraft[]
   downloadVideo: boolean
   includeSeen: boolean
   limit: number
   maxAccounts: '3' | 'all'
   running: RunningAction
+  saveAccounts: () => void
+  setAccountDrafts: (value: AccountDraft[]) => void
   setDownloadVideo: (value: boolean) => void
   setIncludeSeen: (value: boolean) => void
   setLimit: (value: number) => void
@@ -1136,11 +1225,20 @@ function AccountPanel({
   visibleAccounts: AccountSummary[]
   onRun: () => void
 }) {
+  function updateAccount(id: string, patch: Partial<AccountDraft>) {
+    setAccountDrafts(accountDrafts.map((account) => (account.id === id ? { ...account, ...patch } : account)))
+  }
+
+  function removeAccount(id: string) {
+    const next = accountDrafts.filter((account) => account.id !== id)
+    setAccountDrafts(next.length ? next : [createEmptyAccountDraft()])
+  }
+
   return (
     <Card className="control-card account-card page-card">
       <CardContent>
         <PanelTitle icon={ShieldCheck} title="监控批次" />
-        <p className="panel-copy">用于固定跟踪配置里的对标账号池，适合团队每天看最新作品和异常互动。</p>
+        <p className="panel-copy">用于固定跟踪对标账号池；保存后会写入 config.json，下次运行直接沿用。</p>
         <div className="form-grid account-form">
           <Field label="账号范围">
             <Select
@@ -1164,6 +1262,36 @@ function AccountPanel({
           <Switch label="下载无水印视频" checked={downloadVideo} onCheckedChange={setDownloadVideo} />
           <Switch label="提取口播文稿" checked={transcribe} onCheckedChange={setTranscribe} />
         </div>
+        <div className="account-editor">
+          <div className="account-editor-head">
+            <span>账号名称</span>
+            <span>sec_user_id</span>
+            <span>操作</span>
+          </div>
+          {accountDrafts.length ? (
+            accountDrafts.map((account) => (
+              <div className="account-editor-row" key={account.id}>
+                <Input value={account.name} onChange={(event) => updateAccount(account.id, { name: event.target.value })} placeholder="例如：AIGC自修室" />
+                <Input value={account.secUserId} onChange={(event) => updateAccount(account.id, { secUserId: event.target.value })} placeholder="MS4wLjAB..." />
+                <Button variant="ghost" size="icon" onClick={() => removeAccount(account.id)} title="删除账号">
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+            ))
+          ) : (
+            <div className="account-empty">还没有对标账号，先添加一行。</div>
+          )}
+        </div>
+        <div className="account-actions">
+          <Button variant="ghost" onClick={() => setAccountDrafts([...accountDrafts, createEmptyAccountDraft()])}>
+            <Plus className="size-4" />
+            添加账号
+          </Button>
+          <Button variant="secondary" onClick={saveAccounts} disabled={running !== null}>
+            {running === 'accounts' ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            保存账号配置
+          </Button>
+        </div>
         <div className="account-list">
           {visibleAccounts.length ? (
             visibleAccounts.map((account) => (
@@ -1173,7 +1301,7 @@ function AccountPanel({
               </span>
             ))
           ) : (
-            <span className="account-chip muted">请先在 config.json 添加对标账号</span>
+            <span className="account-chip muted">请先在页面添加并保存对标账号</span>
           )}
         </div>
         <Button className="full-action" variant="secondary" onClick={onRun} disabled={running !== null}>

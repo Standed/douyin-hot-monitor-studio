@@ -669,6 +669,50 @@ a {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.account-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.account-editor-head,
+.account-editor-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(220px, 1.3fr) 44px;
+  gap: 8px;
+  align-items: center;
+}
+
+.account-editor-head {
+  color: #7f90a6;
+  font-size: clamp(11px, 0.68vw, 12px);
+  font-weight: 900;
+}
+
+.account-editor-row button {
+  width: 44px;
+}
+
+.account-empty {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: #7f90a6;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px dashed rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  font-size: clamp(12px, 0.72vw, 13px);
+  font-weight: 800;
+}
+
+.account-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: 10px;
+  margin-top: 12px;
+}
+
 .field {
   display: grid;
   gap: 7px;
@@ -1432,6 +1476,9 @@ a {
   }
 
   .account-form,
+  .account-editor-head,
+  .account-editor-row,
+  .account-actions,
   .threshold-editor,
   .switch-panel.compact,
   .provider-grid {

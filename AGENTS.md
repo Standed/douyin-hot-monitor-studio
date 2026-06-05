@@ -25,6 +25,7 @@ README.md              用户安装、配置、费用和私有化说明
 - `LEMONFOX_API_KEY` 同样只能来自 `.env.local`、服务器环境变量或部署 secret。
 - 本地转写优先推荐 `faster-whisper`，已有 Whisper 环境时再用 `openai-whisper`。
 - 对标账号监控、下载、本地转写依赖本地解析服务，默认 `http://127.0.0.1:8091`。
+- 对标账号池、每账号抓取条数、下载视频和转写开关必须优先在前端“对标账号”页面配置；`douyin-monitor/config.json` 是落盘文件和开发兜底，不要让普通用户每次进源码目录改 JSON。
 - 需要改 Cookie、代理或高级解析服务配置时，优先改完整 `Douyin_TikTok_Download_API` 部署或挂载它的配置文件，不要把上游项目源码搬进本仓库。
 
 ## 本地启动规则
@@ -46,6 +47,7 @@ README.md              用户安装、配置、费用和私有化说明
 ## UI 维护
 
 - 左侧目录必须能进入对应页面，不要把低粉爆款和对标账号的运行入口混在同一个主页面里。
+- 对标账号页面要同时支持运行账号监控和维护账号池；保存动作写回 `account_monitor.accounts`，并保留 `count_per_account`、`download_video`、`transcribe` 等运行默认值。
 - 低粉爆款和对标账号的最新结果要按报告前缀隔离：`lowfan_` 与 `account_new`。
 - 保留浅色/夜间主题切换，并用实际 DOM 状态切换，不做假按钮。
 - Tooltip 用于解释付费、用途和部署成本；不要在卡片里重复堆同一段说明。
