@@ -304,6 +304,9 @@ const navItems: Array<{ id: PageId; icon: IconComponent; label: string; desc: st
   { id: 'feedback', icon: MessageSquareText, label: '反馈', desc: '建议和问题' },
 ]
 
+const primaryPageIds: PageId[] = ['overview', 'lowfan', 'accounts', 'settings', 'reports']
+const utilityPageIds: PageId[] = ['ops', 'about', 'feedback']
+
 const pageCopy: Record<PageId, { title: string; eyebrow: string; description: string }> = {
   overview: {
     title: '抖音爆款监控台',
@@ -553,6 +556,7 @@ function App() {
   const pageRows = activePage === 'lowfan' ? data.latestLowfanRows : activePage === 'accounts' ? data.latestAccountRows : data.latestRows
   const displayRows = lastRun?.rows?.length && resultModeMatchesPage(resultMode, activePage) ? lastRun.rows : pageRows
   const currentPage = pageCopy[activePage]
+  const isUtilityPage = utilityPageIds.includes(activePage)
 
   const feedItems = displayRows.length
     ? displayRows
@@ -978,66 +982,90 @@ function App() {
       </aside>
 
       <section className="main-stream">
-        <header className="stream-header">
-          <div>
-            <span className="page-eyebrow">{currentPage.eyebrow}</span>
-            <h1>{currentPage.title}</h1>
-            <p>{currentPage.description}</p>
-          </div>
-          <div className="header-status">
-            <Badge variant={data.service.ok ? 'success' : 'warning'}>
-              {data.service.ok ? <CheckCircle2 className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
-              {data.service.ok ? '解析服务在线' : '解析服务异常'}
-            </Badge>
-            <Button variant="ghost" size="icon" onClick={refresh} disabled={loading} title="刷新">
-              <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />
-            </Button>
-          </div>
-          <div className="header-tools">
-            <div className="tabs-shell">
-              {navItems.slice(0, 5).map((item) => (
-                <button className={item.id === activePage ? 'tab active' : 'tab'} key={item.id} onClick={() => navigate(item.id)}>
-                  {item.label}
-                </button>
-              ))}
-            </div>
-            <div className="search-box">
-              <Search className="size-4" />
-              <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索关键词..." />
-              <Button onClick={runLowfan} disabled={running !== null || !keyword.trim()}>
-                {running === 'lowfan' ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
-                搜索
-              </Button>
-            </div>
-          </div>
-        </header>
+        {!isUtilityPage && (
+          <>
+            <header className="stream-header">
+              <div>
+                <span className="page-eyebrow">{currentPage.eyebrow}</span>
+                <h1>{currentPage.title}</h1>
+                <p>{currentPage.description}</p>
+              </div>
+              <div className="header-status">
+                <Badge variant={data.service.ok ? 'success' : 'warning'}>
+                  {data.service.ok ? <CheckCircle2 className="size-3.5" /> : <AlertTriangle className="size-3.5" />}
+                  {data.service.ok ? '解析服务在线' : '解析服务异常'}
+                </Badge>
+                <Button variant="ghost" size="icon" onClick={refresh} disabled={loading} title="刷新">
+                  <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />
+                </Button>
+              </div>
+              <div className="header-tools">
+                <div className="tabs-shell">
+                  {primaryPageIds.map((pageId) => {
+                    const item = navItems.find((navItem) => navItem.id === pageId)
+                    if (!item) return null
+                    return (
+                      <button className={item.id === activePage ? 'tab active' : 'tab'} key={item.id} onClick={() => navigate(item.id)}>
+                        {item.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                <div className="search-box">
+                  <Search className="size-4" />
+                  <Input value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索关键词..." />
+                  <Button onClick={runLowfan} disabled={running !== null || !keyword.trim()}>
+                    {running === 'lowfan' ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                    搜索
+                  </Button>
+                </div>
+              </div>
+            </header>
 
-        <section className="ops-strip">
-          <StatusPill icon={Users} label="监控账号" value={`${data.config.enabledAccountCount} / ${data.config.accountCount} 个`} />
-          <StatusPill icon={Gauge} label="粉丝阈值" value={`≤ ${formatNumber(data.config.thresholds.fans_num)}`} />
-          <StatusPill
-            icon={Sparkles}
-            label="TikHub"
-            value={data.config.hasTikhubKey ? '已接入' : '未配置'}
-            tone={data.config.hasTikhubKey ? 'good' : 'warn'}
-          />
-          <StatusPill
-            icon={Captions}
-            label="转写"
-            value={formatProvider(activeTranscription.provider)}
-            tone={providerStatus.available ? 'good' : 'warn'}
-          />
-          <div className="run-actions">
-            <Button variant="secondary" onClick={runAccount} disabled={running !== null}>
-              {running === 'account' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-              跑账号监控
-            </Button>
-            <Button variant="ghost" onClick={refresh} disabled={loading}>
-              <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />
-              刷新
-            </Button>
-          </div>
-        </section>
+            <section className="ops-strip">
+              <StatusPill icon={Users} label="监控账号" value={`${data.config.enabledAccountCount} / ${data.config.accountCount} 个`} />
+              <StatusPill icon={Gauge} label="粉丝阈值" value={`≤ ${formatNumber(data.config.thresholds.fans_num)}`} />
+              <StatusPill
+                icon={Sparkles}
+                label="TikHub"
+                value={data.config.hasTikhubKey ? '已接入' : '未配置'}
+                tone={data.config.hasTikhubKey ? 'good' : 'warn'}
+              />
+              <StatusPill
+                icon={Captions}
+                label="转写"
+                value={formatProvider(activeTranscription.provider)}
+                tone={providerStatus.available ? 'good' : 'warn'}
+              />
+              <div className="run-actions">
+                <Button variant="secondary" onClick={runAccount} disabled={running !== null}>
+                  {running === 'account' ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+                  跑账号监控
+                </Button>
+                <Button variant="ghost" onClick={refresh} disabled={loading}>
+                  <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />
+                  刷新
+                </Button>
+              </div>
+            </section>
+          </>
+        )}
+
+        {isUtilityPage && (
+          <section className="utility-heading">
+            <div>
+              <span className="page-eyebrow">{currentPage.eyebrow}</span>
+              <h1>{currentPage.title}</h1>
+              <p>{currentPage.description}</p>
+            </div>
+            {activePage === 'ops' && (
+              <Button variant="ghost" onClick={refresh} disabled={loading}>
+                <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} />
+                刷新诊断
+              </Button>
+            )}
+          </section>
+        )}
 
         {activePage === 'overview' && (
           <>
@@ -1077,7 +1105,7 @@ function App() {
         )}
 
         {activePage === 'accounts' && (
-          <section className="workspace-grid">
+          <section className="workspace-grid accounts-workspace">
             <AccountPanel
               downloadVideo={downloadVideo}
               includeSeen={includeSeen}
@@ -1390,15 +1418,18 @@ function AccountPanel({
                 <Input value={account.name} onChange={(event) => updateAccount(account.id, { name: event.target.value })} placeholder="例如：AIGC自修室" />
                 <Input value={account.secUserId} onChange={(event) => updateAccount(account.id, { secUserId: event.target.value })} placeholder="例如：MS4wLjABAAAAX7P5NK7HVXt5dPUWL9qoxKqMcHaLM7rkqxQqEK2C7vrgLUJ3c_4wr8H4cTk3ThnN" />
                 <div className="account-row-actions">
-                  <Button variant="ghost" size="icon" onClick={() => moveAccount(account.id, -1)} disabled={index === 0} title="上移">
+                  <button className="account-action" onClick={() => moveAccount(account.id, -1)} disabled={index === 0} type="button">
                     <ArrowUp className="size-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => moveAccount(account.id, 1)} disabled={index === accountDrafts.length - 1} title="下移">
+                    上移
+                  </button>
+                  <button className="account-action" onClick={() => moveAccount(account.id, 1)} disabled={index === accountDrafts.length - 1} type="button">
                     <ArrowDown className="size-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => removeAccount(account.id)} title="删除账号">
+                    下移
+                  </button>
+                  <button className="account-action danger" onClick={() => removeAccount(account.id)} type="button">
                     <Trash2 className="size-4" />
-                  </Button>
+                    移除
+                  </button>
                 </div>
               </div>
             ))
