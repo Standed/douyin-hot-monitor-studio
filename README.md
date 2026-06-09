@@ -91,11 +91,11 @@ TRANSCRIPTION_PROVIDER=faster-whisper
 
 ### 反馈入口
 
-左侧“反馈”页会打开公司飞书问卷，并可通过飞书群机器人通知维护人。问卷地址可以保留默认值；群机器人 webhook 只放在本机 `.env.local`、服务器环境变量或部署 secret 里，不要提交到仓库：
+左侧“反馈”页会打开公司飞书问卷。涉及截图、图片、异常页面、复现步骤或更完整的需求说明时，统一通过问卷提交，方便后续归档和跟进。问卷地址可以保留默认值；群机器人 webhook 只放在本机 `.env.local`、服务器环境变量或部署 secret 里，不要提交到仓库：
 
 ```bash
 FEISHU_FEEDBACK_WEBHOOK=
-FEISHU_FEEDBACK_FORM_URL=https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38?table=tbluyxSuTJzzm4tw&view=vewSjYQe24
+FEISHU_FEEDBACK_FORM_URL=https://xiyangshiai.feishu.cn/share/base/form/shrcn27png3VUckWYkSEuKX3aVc
 ```
 
 ## 推荐启动方式

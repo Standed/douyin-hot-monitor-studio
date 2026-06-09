@@ -110,7 +110,7 @@ type ThresholdSettings = {
   defaultLowFan: ConfigSummary['defaultLowFan']
 }
 
-type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | 'feedback' | null
+type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | null
 
 type ConfigSummary = {
   accountCount: number
@@ -206,16 +206,10 @@ type FeedbackSettings = {
   webhookConfigured: boolean
 }
 
-type FeedbackState = {
-  message: string
-  contact: string
-  page: string
-}
-
 const feedbackDefaults: FeedbackSettings = {
-  formUrl: 'https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38?table=tbluyxSuTJzzm4tw&view=vewSjYQe24',
-  baseUrl: 'https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38',
-  formId: 'vewSjYQe24',
+  formUrl: 'https://xiyangshiai.feishu.cn/share/base/form/shrcn27png3VUckWYkSEuKX3aVc',
+  baseUrl: 'https://xiyangshiai.feishu.cn/share/base/form/shrcn27png3VUckWYkSEuKX3aVc',
+  formId: 'shrcn27png3VUckWYkSEuKX3aVc',
   webhookConfigured: false,
 }
 
@@ -350,7 +344,7 @@ const pageCopy: Record<PageId, { title: string; eyebrow: string; description: st
   feedback: {
     title: '说说你的想法',
     eyebrow: 'Feedback',
-    description: '发现 bug、想要的功能、看不顺眼的地方都可以告诉我，提交后会通知到飞书群。',
+    description: '发现 bug、想要的功能、截图或图片说明，建议统一通过飞书问卷提交。',
   },
 }
 
@@ -554,8 +548,6 @@ function App() {
     const saved = window.localStorage.getItem('douyin-monitor-theme')
     return saved === 'dark' || saved === 'light' || saved === 'system' ? saved : 'system'
   })
-  const [feedbackDraft, setFeedbackDraft] = useState<FeedbackState>({ message: '', contact: '', page: '' })
-
   const latestReport = data.reports[0]
   const integrations = normalizeIntegrations(data.config)
   const activeTranscription = integrations.transcription
@@ -866,39 +858,6 @@ function App() {
     }
   }
 
-  async function submitFeedback() {
-    if (!feedbackDraft.message.trim()) return
-    setRunning('feedback')
-    try {
-      const result = await api<{ ok: boolean; webhookConfigured: boolean; error?: string }>('/api/feedback', {
-        method: 'POST',
-        body: JSON.stringify({
-          ...feedbackDraft,
-          page: feedbackDraft.page || currentPage.title,
-        }),
-      })
-      setLastRun({
-        ok: Boolean(result.ok),
-        command: 'POST /api/feedback',
-        code: result.ok ? 0 : 1,
-        stdout: result.webhookConfigured ? '反馈已发送到飞书群' : '反馈已记录；飞书群机器人未配置',
-        stderr: result.error || '',
-      })
-      if (result.ok) setFeedbackDraft({ message: '', contact: '', page: '' })
-      setData((current) => ({
-        ...current,
-        feedback: {
-          ...(current.feedback || feedbackDefaults),
-          webhookConfigured: result.webhookConfigured,
-        },
-      }))
-    } catch (error) {
-      setLastRun(createRunError('POST /api/feedback', error))
-    } finally {
-      setRunning(null)
-    }
-  }
-
   useEffect(() => {
     let cancelled = false
 
@@ -1201,15 +1160,7 @@ function App() {
         {activePage === 'reports' && <ReportsPage outputDir={data.config.outputDir} reports={data.reports} />}
         {activePage === 'ops' && <OpsPage data={data} lastErrors={lastErrors} lastRun={lastRun} parsedRun={parsedRun} providerStatus={providerStatus} />}
         {activePage === 'about' && <AboutPage />}
-        {activePage === 'feedback' && (
-          <FeedbackPage
-            feedback={feedbackDraft}
-            running={running}
-            setFeedback={setFeedbackDraft}
-            settings={data.feedback || feedbackDefaults}
-            submitFeedback={submitFeedback}
-          />
-        )}
+        {activePage === 'feedback' && <FeedbackPage settings={data.feedback || feedbackDefaults} />}
       </section>
     </main>
   )
@@ -2159,54 +2110,23 @@ function DeploymentGuide() {
 }
 
 function FeedbackPage({
-  feedback,
-  running,
-  setFeedback,
   settings,
-  submitFeedback,
 }: {
-  feedback: FeedbackState
-  running: RunningAction
-  setFeedback: (value: FeedbackState) => void
   settings: FeedbackSettings
-  submitFeedback: () => void
 }) {
   return (
     <section className="feedback-page">
       <Card className="feedback-card">
         <CardContent>
           <PanelTitle icon={MessageSquareText} title="反馈" />
-          <p className="panel-copy">发现 bug、想要的功能、看不顺眼的地方，都可以直接写。提交后会通知飞书群；也可以打开公司飞书问卷补充更完整的信息。</p>
-          <Field label="想说点什么？">
-            <textarea
-              className="textarea-control feedback-textarea"
-              value={feedback.message}
-              onChange={(event) => setFeedback({ ...feedback, message: event.target.value })}
-              maxLength={2000}
-              placeholder="比如：对标账号这里希望能批量导入；接口配置页某个说明看不懂；某个按钮位置不顺手。"
-              rows={8}
-            />
-          </Field>
-          <div className="feedback-count">{feedback.message.length} / 2000</div>
-          <div className="form-grid">
-            <Field label="联系方式（选填）">
-              <Input value={feedback.contact} onChange={(event) => setFeedback({ ...feedback, contact: event.target.value })} placeholder="邮箱 / 微信 / 手机号 / 飞书名" />
-            </Field>
-            <Field label="页面位置（选填）">
-              <Input value={feedback.page} onChange={(event) => setFeedback({ ...feedback, page: event.target.value })} placeholder="例如：对标账号 / 接口配置" />
-            </Field>
-          </div>
+          <p className="panel-copy">建议直接通过公司飞书问卷反馈。涉及截图、图片、异常页面、复现步骤或更完整的需求说明时，请统一放进问卷，方便后续归档和跟进。</p>
           <div className="feedback-actions">
-            <Button onClick={submitFeedback} disabled={running !== null || !feedback.message.trim()}>
-              {running === 'feedback' ? <Loader2 className="size-4 animate-spin" /> : <MessageSquareText className="size-4" />}
-              发送反馈
-            </Button>
-            <a className="feedback-link" href={settings.formUrl || settings.baseUrl} target="_blank" rel="noreferrer">
+            <a className="feedback-link feedback-link-primary" href={settings.formUrl || settings.baseUrl} target="_blank" rel="noreferrer">
               <ExternalLink className="size-4" />
-              打开飞书问卷
+              打开飞书反馈问卷
             </a>
           </div>
-          <p className="panel-hint">{settings.webhookConfigured ? '飞书群机器人已配置，页面内提交会同步通知。' : '当前环境没有配置 FEISHU_FEEDBACK_WEBHOOK，页面会保留反馈结果提示；部署时配置环境变量即可通知飞书群。'}</p>
+          <p className="panel-hint">文字反馈也建议放进问卷；这样可以和截图、图片附件、页面位置、联系方式一起留档。</p>
         </CardContent>
       </Card>
     </section>

@@ -18,9 +18,9 @@ const app = express()
 const port = 8787
 const host = process.env.HOST || '127.0.0.1'
 const feedbackDefaults = {
-  formUrl: 'https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38?table=tbluyxSuTJzzm4tw&view=vewSjYQe24',
-  baseUrl: 'https://xiyangshiai.feishu.cn/base/RauKbsrBkakfgOshWymciovnn38',
-  formId: 'vewSjYQe24',
+  formUrl: 'https://xiyangshiai.feishu.cn/share/base/form/shrcn27png3VUckWYkSEuKX3aVc',
+  baseUrl: 'https://xiyangshiai.feishu.cn/share/base/form/shrcn27png3VUckWYkSEuKX3aVc',
+  formId: 'shrcn27png3VUckWYkSEuKX3aVc',
 }
 
 const defaultLowFanConfig = {
