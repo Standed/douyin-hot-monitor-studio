@@ -122,6 +122,8 @@ a {
   border-right: 1px solid rgba(148, 163, 184, 0.12);
   background: linear-gradient(180deg, rgba(8, 13, 27, 0.98), rgba(4, 9, 20, 0.96));
   box-shadow: 22px 0 60px rgba(0, 0, 0, 0.32);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: clamp(16px, 1.4vw, 24px) clamp(12px, 1vw, 16px);
 }
 
@@ -609,8 +611,7 @@ a {
 }
 
 .page-card {
-  position: sticky;
-  top: 18px;
+  position: relative;
 }
 
 .lowfan-card {

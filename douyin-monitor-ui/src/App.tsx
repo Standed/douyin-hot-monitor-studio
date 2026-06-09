@@ -486,6 +486,21 @@ function createEmptyAccountDraft(): AccountDraft {
   }
 }
 
+function normalizeDouyinSecUserId(value: string) {
+  const raw = value.trim()
+  if (!raw) return ''
+  const fromUserPath = raw.match(/\/user\/([^/?#\s]+)/i)?.[1]
+  const fromText = raw.match(/(MS4wLj[A-Za-z0-9_-]+)/)?.[1]
+  return decodeURIComponent(fromUserPath || fromText || raw).replace(/[?#].*$/, '').trim()
+}
+
+function normalizeAccountDraftsForSubmit(accounts: AccountDraft[]) {
+  return accounts.map((account) => ({
+    ...account,
+    secUserId: normalizeDouyinSecUserId(account.secUserId),
+  }))
+}
+
 function normalizeIntegrations(config: ConfigSummary): NonNullable<ConfigSummary['integrations']> {
   const fallback = defaultData.config.integrations!
   const incoming = config.integrations
@@ -557,7 +572,10 @@ function App() {
   const lastErrors = getLastErrors(data.state)
   const visibleAccounts = data.config.accounts
   const pageRows = activePage === 'lowfan' ? data.latestLowfanRows : activePage === 'accounts' ? data.latestAccountRows : data.latestRows
-  const displayRows = lastRun?.rows?.length && resultModeMatchesPage(resultMode, activePage) ? lastRun.rows : pageRows
+  const isActiveRunPage = Boolean(lastRun && resultModeMatchesPage(resultMode, activePage))
+  const pendingRunMode = activePage === 'lowfan' ? 'lowfan' : activePage === 'accounts' ? 'account' : null
+  const isPendingRunPage = Boolean(pendingRunMode && running === pendingRunMode)
+  const displayRows = isActiveRunPage ? (lastRun?.rows ?? []) : isPendingRunPage ? [] : pageRows
   const currentPage = pageCopy[activePage]
   const isUtilityPage = utilityPageIds.includes(activePage)
 
@@ -566,8 +584,8 @@ function App() {
     : [
         {
           video_id: 'waiting-for-cookie',
-          title: '等待第一次命中结果',
-          author: '本地监控器',
+          title: isPendingRunPage ? '正在运行搜索' : isActiveRunPage && lastRun ? (lastRun.ok ? '本次没有命中结果' : '本次运行失败') : '等待第一次命中结果',
+          author: isPendingRunPage ? '本次搜索' : isActiveRunPage && lastRun ? '本次搜索' : '本地监控器',
           source_account: '系统提示',
           create_time: latestReport?.modifiedAt,
           follower_count: data.config.thresholds.fans_num,
@@ -576,6 +594,13 @@ function App() {
           collect_count: data.config.thresholds.collect,
           share_count: data.config.thresholds.share,
           url: data.service.apiBase,
+          hit_reason: isPendingRunPage
+            ? '正在请求监控服务，完成后只展示本次搜索返回的结果。'
+            : isActiveRunPage && lastRun
+              ? lastRun.ok
+                ? '换一个关键词、时间范围或降低阈值再试。'
+                : friendlyRunError(lastRun.stderr)
+              : undefined,
         },
       ]
 
@@ -622,12 +647,15 @@ function App() {
 
   async function runAccount() {
     setRunning('account')
+    setResultMode('account')
+    setActivePage('accounts')
+    setLastRun(undefined)
     try {
       const result = await api<RunResult>('/api/run/account', {
         method: 'POST',
         body: JSON.stringify({
           limit,
-          accounts: accountDrafts,
+          accounts: normalizeAccountDraftsForSubmit(accountDrafts),
           includeSeen,
           download: downloadVideo,
           transcribe,
@@ -635,8 +663,6 @@ function App() {
         }),
       })
       setLastRun(result)
-      setResultMode('account')
-      setActivePage('accounts')
       await refresh()
     } catch (error) {
       setLastRun(createRunError('POST /api/run/account', error))
@@ -647,6 +673,9 @@ function App() {
 
   async function runLowfan() {
     setRunning('lowfan')
+    setResultMode('lowfan')
+    setActivePage('lowfan')
+    setLastRun(undefined)
     try {
       const result = await api<RunResult>('/api/run/lowfan', {
         method: 'POST',
@@ -662,8 +691,6 @@ function App() {
         }),
       })
       setLastRun(result)
-      setResultMode('lowfan')
-      setActivePage('lowfan')
       await refresh()
     } catch (error) {
       setLastRun(createRunError('POST /api/run/lowfan', error))
@@ -830,7 +857,7 @@ function App() {
           countPerAccount: limit,
           downloadVideo,
           transcribe,
-          accounts: accountDrafts,
+          accounts: normalizeAccountDraftsForSubmit(accountDrafts),
         }),
       })
       setLastRun({
@@ -1427,8 +1454,9 @@ function AccountPanel({
                   className="account-id-input"
                   title={account.secUserId}
                   value={account.secUserId}
+                  onBlur={(event) => updateAccount(account.id, { secUserId: normalizeDouyinSecUserId(event.target.value) })}
                   onChange={(event) => updateAccount(account.id, { secUserId: event.target.value })}
-                  placeholder="MS4wLjAB..."
+                  placeholder="粘贴抖音主页或 MS4wLjAB..."
                 />
                 <div className="account-row-actions">
                   <button
@@ -1450,7 +1478,7 @@ function AccountPanel({
             <div className="account-empty">还没有对标账号，先添加一行。</div>
           )}
         </div>
-        <p className="panel-hint">用户 ID 是监控账号抖音主页网址里 /user/ 后、? 前的那一段，例如 https://www.douyin.com/user/MS4wLjAB...?from_tab_name=main 中的 MS4wLjAB...。</p>
+        <p className="panel-hint">可以直接粘贴抖音主页链接，例如 https://www.douyin.com/user/MS4wLjAB...?from_tab_name=main；系统会自动保存 /user/ 后、? 前的账号 ID。</p>
         <div className="account-actions">
           <Button variant="secondary" onClick={saveAccounts} disabled={running !== null}>
             {running === 'accounts' ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}

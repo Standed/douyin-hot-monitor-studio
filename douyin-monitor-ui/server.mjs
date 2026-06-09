@@ -223,16 +223,26 @@ function normalizeLowFanConfig(value = {}) {
   }
 }
 
+function normalizeDouyinSecUserId(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  const fromUserPath = raw.match(/\/user\/([^/?#\s]+)/i)?.[1]
+  const fromText = raw.match(/(MS4wLj[A-Za-z0-9_-]+)/)?.[1]
+  return decodeURIComponent(fromUserPath || fromText || raw)
+    .replace(/[?#].*$/, '')
+    .trim()
+}
+
 function normalizeAccountMonitorConfig(value = {}, current = {}) {
   const incomingAccounts = Array.isArray(value.accounts) ? value.accounts : current.accounts || []
   const accounts = []
 
   for (const account of incomingAccounts) {
     const name = String(account?.name || '').trim()
-    const secUserId = String(account?.secUserId || account?.sec_user_id || '').trim()
+    const secUserId = normalizeDouyinSecUserId(account?.secUserId || account?.sec_user_id || '')
     if (!name && !secUserId) continue
     if (!name || !secUserId) {
-      return { error: '账号名称和 sec_user_id 都要填写；空白行可以直接留空。' }
+      return { error: '账号名称和抖音主页链接 / sec_user_id 都要填写；空白行可以直接留空。' }
     }
     accounts.push({ name, sec_user_id: secUserId, enabled: account?.enabled !== false })
   }
