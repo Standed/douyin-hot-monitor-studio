@@ -15,6 +15,37 @@ README.md              用户安装、配置、费用和私有化说明
 
 默认 Compose 服务名是 `douyin-parser`，宿主机健康检查地址是 `http://127.0.0.1:8091/openapi.json`，UI 容器内部地址是 `http://douyin-parser`。本地 `npm run dev` 不会自动启动解析服务；开发前要确认 8091 端口已经由兼容的 `Douyin_TikTok_Download_API` 服务占用。
 
+## Mac mini 内部部署边界
+
+当前 `douyin.aizao.ai` 是深圳艾造科技有限公司 Mac mini `company-core` 上的内部素材雷达入口，通过 Cloudflare Tunnel 暴露，并应由 Cloudflare Access 邮箱 OTP 保护。
+
+当前已经切到 Mac mini production launchd 基线：
+
+- `company.douyin-hot-monitor-studio` 跑 `npm run build` 后的静态 `dist`，并通过 5174 反代 `/api`。
+- `server.mjs` 继续作为 Express 控制 API 运行在 8787。
+- `company.douyin-parser` 提供 `http://127.0.0.1:8091/openapi.json` 解析服务。
+- 旧的 `company.douyin-hot-monitor-studio.dev` 不应该继续运行。
+
+后续维护要保持这个正式服务边界：
+
+- 不要长期用 Vite dev server 承接同事访问。
+- 不要把 `npm run dev` 当作生产部署方式。
+- 服务数量和依赖冲突继续增加时，再考虑 Docker/Colima 或独立 VM；不要为了“正规化”过早引入额外基础设施。
+- 保持 parser、UI/API、Python CLI、转写服务的健康检查分离。
+- 页面上要能清楚显示 TikHub、解析服务、转写、飞书回写分别是“可用 / 未配置 / 失败原因”。
+- 监控结果短期可以写入 Mac mini 本地输出或飞书 Base；只有当跨同事长期查询、审计和跨系统联动复杂后，才评估 Supabase。
+- `douyin.aizao.ai` 可以加 Access；视频、截图或公众号最终要公开引用的媒体源不能放在 Access 后面。
+
+如果改动会影响 Mac mini 线上服务，必须先说明是否会重启 launchd、Compose、parser 或 Tunnel，不要把本地开发命令当成生产部署。
+
+生产基线检查：
+
+```bash
+node scripts/check-macmini-production.mjs
+```
+
+该脚本检查 launchd、5174 UI/API、8091 parser 和公网 Cloudflare Access。它通过只代表 Mac mini production 底座正常，不代表所有业务采集能力都成功。
+
 ## 配置原则
 
 - 页面只暴露用户必须配置或必须决策的内容。
@@ -63,6 +94,12 @@ README.md              用户安装、配置、费用和私有化说明
 ```bash
 cd douyin-monitor-ui
 npm run build
+```
+
+涉及 Mac mini 线上运行方式、Access、parser、API 反代或部署脚本时，还要运行：
+
+```bash
+node scripts/check-macmini-production.mjs
 ```
 
 涉及 UI 时还要打开本地页面检查：
