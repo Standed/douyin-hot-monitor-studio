@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildFeishuBaseFieldGuide, buildFeishuBaseSetupGuide, feishuBaseStatusFromEnv, normalizeFeishuBaseConfigInput } from '../server/feishu-base-config.mjs'
+import { buildFeishuBaseCheckResult, buildFeishuBaseFieldGuide, buildFeishuBaseSetupGuide, feishuBaseStatusFromEnv, normalizeFeishuBaseConfigInput } from '../server/feishu-base-config.mjs'
 
 test('normalizes Feishu Base config input without leaking secrets', () => {
   const input = normalizeFeishuBaseConfigInput({
@@ -79,4 +79,51 @@ test('builds a Feishu Base field guide for MVP setup', () => {
   assert.ok(recommendedNames.includes('口播正文'))
   assert.match(guide.copyText, /必需字段：去重键/)
   assert.match(guide.copyText, /IP操盘判断/)
+})
+
+test('evaluates Feishu Base config and field readiness', () => {
+  const emptyCheck = buildFeishuBaseCheckResult(feishuBaseStatusFromEnv({}))
+  assert.equal(emptyCheck.ready, false)
+  assert.equal(emptyCheck.status, 'blocked_by_config')
+  assert.deepEqual(emptyCheck.missingConfig, ['appToken', 'tableId', 'openApi'])
+
+  const missingRequired = buildFeishuBaseCheckResult(
+    feishuBaseStatusFromEnv({
+      FEISHU_BASE_APP_TOKEN: 'base',
+      FEISHU_BASE_TABLE_ID: 'table',
+      FEISHU_BASE_APP_ID: 'cli_xxx',
+      FEISHU_BASE_APP_SECRET: 'secret',
+    }),
+    ['标题', '素材摘要', 'IP操盘判断'],
+  )
+  assert.equal(missingRequired.ready, false)
+  assert.equal(missingRequired.status, 'missing_required_fields')
+  assert.deepEqual(missingRequired.missingRequired, ['去重键'])
+
+  const readyWithRecommendations = buildFeishuBaseCheckResult(
+    feishuBaseStatusFromEnv({
+      FEISHU_BASE_APP_TOKEN: 'base',
+      FEISHU_BASE_TABLE_ID: 'table',
+      FEISHU_BASE_APP_ID: 'cli_xxx',
+      FEISHU_BASE_APP_SECRET: 'secret',
+    }),
+    ['去重键', '标题', '素材摘要', 'IP操盘判断'],
+  )
+  assert.equal(readyWithRecommendations.ready, true)
+  assert.equal(readyWithRecommendations.status, 'ready_with_recommendations')
+  assert.ok(readyWithRecommendations.missingRecommended.includes('下一步动作'))
+
+  const allFields = buildFeishuBaseFieldGuide().groups.flatMap((group) => group.fields.map((field) => field.name))
+  const ready = buildFeishuBaseCheckResult(
+    feishuBaseStatusFromEnv({
+      FEISHU_BASE_APP_TOKEN: 'base',
+      FEISHU_BASE_TABLE_ID: 'table',
+      FEISHU_BASE_APP_ID: 'cli_xxx',
+      FEISHU_BASE_APP_SECRET: 'secret',
+    }),
+    ['去重键', ...allFields],
+  )
+  assert.equal(ready.ready, true)
+  assert.equal(ready.status, 'ready')
+  assert.deepEqual(ready.missingRecommended, [])
 })

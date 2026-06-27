@@ -105,6 +105,75 @@ export function buildFeishuBaseFieldGuide() {
   return { required, groups, copyText }
 }
 
+export function buildFeishuBaseCheckResult(status = {}, fieldNames = null, error = '') {
+  const fieldGuide = buildFeishuBaseFieldGuide()
+  const setupGuide = status.setupGuide || buildFeishuBaseSetupGuide(status)
+  if (!setupGuide.ready) {
+    return {
+      ready: false,
+      status: 'blocked_by_config',
+      title: setupGuide.title,
+      missingConfig: setupGuide.missingKeys,
+      missingRequired: fieldGuide.required.map((field) => field.name),
+      missingRecommended: fieldGuide.groups.flatMap((group) => group.fields.map((field) => field.name)),
+      checkedFields: [],
+      error,
+    }
+  }
+
+  const checkedFields = Array.isArray(fieldNames) ? fieldNames : Array.from(fieldNames || [])
+  if (error) {
+    return {
+      ready: false,
+      status: 'check_failed',
+      title: '飞书结果库检查失败',
+      missingConfig: [],
+      missingRequired: [],
+      missingRecommended: [],
+      checkedFields,
+      error,
+    }
+  }
+
+  const fieldSet = new Set(checkedFields)
+  const missingRequired = fieldGuide.required.map((field) => field.name).filter((field) => !fieldSet.has(field))
+  const missingRecommended = fieldGuide.groups.flatMap((group) => group.fields.map((field) => field.name)).filter((field) => !fieldSet.has(field))
+  if (missingRequired.length) {
+    return {
+      ready: false,
+      status: 'missing_required_fields',
+      title: `缺少必需字段：${missingRequired.join('、')}`,
+      missingConfig: [],
+      missingRequired,
+      missingRecommended,
+      checkedFields,
+      error: '',
+    }
+  }
+  if (missingRecommended.length) {
+    return {
+      ready: true,
+      status: 'ready_with_recommendations',
+      title: '可以同步，建议补充推荐字段',
+      missingConfig: [],
+      missingRequired: [],
+      missingRecommended,
+      checkedFields,
+      error: '',
+    }
+  }
+  return {
+    ready: true,
+    status: 'ready',
+    title: '飞书结果库字段完整',
+    missingConfig: [],
+    missingRequired: [],
+    missingRecommended: [],
+    checkedFields,
+    error: '',
+  }
+}
+
 export function feishuBaseStatusFromEnv(envValues = {}) {
   const appId = envValues.FEISHU_BASE_APP_ID || envValues.LARK_APP_ID || ''
   const appSecret = envValues.FEISHU_BASE_APP_SECRET || envValues.LARK_APP_SECRET || ''

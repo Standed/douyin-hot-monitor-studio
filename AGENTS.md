@@ -87,6 +87,7 @@ node scripts/check-macmini-production.mjs
 - “接口配置 -> 飞书结果库”可以写入 `douyin-monitor-ui/.env.local`。页面状态和输入框只允许显示已配置状态和掩码；不要在日志、截图、README 或提交记录里打印完整 `FEISHU_BASE_APP_SECRET`、`FEISHU_BASE_APP_TOKEN`、`FEISHU_BASE_TABLE_ID`。飞书结果库跳转链接可以使用 Base URL。
 - 飞书结果库未配置完整时，页面必须给用户明确的下一步清单，例如补 Base Token、Table ID、OpenAPI App ID/Secret；不要只显示“未配置”。
 - “接口配置 -> 飞书结果库”必须保留最小建表字段清单，突出必需字段 `去重键`，并展示运营协作、IP 操盘判断、资产与报告三组推荐字段，方便用户按页面建飞书 Base。
+- “接口配置 -> 飞书结果库”的“检查飞书表”必须保持只读：读取当前 Base 字段并提示缺基础配置、缺 `去重键` 或缺推荐字段；不要自动创建字段，不要写素材数据，不要打印完整密钥。
 - 飞书结果库正式协作优先配 OpenAPI App ID/Secret + Base Token/Table ID；`lark-cli` 只作为本机调试或过渡方案，不要让团队协作依赖个人授权登录态。
 - 对标账号页面要同时支持运行账号监控和维护账号池；保存动作写回 `account_monitor.accounts`，并保留 `count_per_account`、`download_video`、`transcribe` 等运行默认值。
 - 低粉爆款和对标账号的最新结果要按报告前缀隔离：`lowfan_` 与 `account_new`。

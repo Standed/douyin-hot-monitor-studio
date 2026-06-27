@@ -1940,6 +1940,57 @@ a {
   font-size: clamp(12px, 0.72vw, 13px);
 }
 
+.field-guide-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.field-check-result {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 12px;
+  color: #dbe7f7;
+  background: rgba(245, 158, 11, 0.08);
+  font-size: clamp(12px, 0.72vw, 13px);
+  line-height: 1.55;
+}
+
+.field-check-result.is-ready {
+  border-color: rgba(0, 224, 164, 0.24);
+  background: rgba(0, 224, 164, 0.08);
+}
+
+.field-check-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f8d38a;
+}
+
+.field-check-result.is-ready .field-check-head {
+  color: var(--accent-2);
+}
+
+.field-check-head svg {
+  flex: 0 0 auto;
+}
+
+.field-check-head strong {
+  font-size: clamp(12px, 0.76vw, 14px);
+}
+
+.field-check-result p,
+.field-check-result span {
+  margin: 0;
+  color: #9fb0c5;
+  font-weight: 800;
+}
+
 .history-meta,
 .workflow-lane,
 .deployment-steps {
@@ -2249,6 +2300,10 @@ a {
   }
 
   .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .field-guide-actions {
     grid-template-columns: 1fr;
   }
 

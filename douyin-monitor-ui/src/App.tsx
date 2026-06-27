@@ -110,6 +110,17 @@ type FeishuBaseState = {
   }
 }
 
+type FeishuBaseCheckResult = {
+  ready: boolean
+  status: string
+  title: string
+  missingConfig: string[]
+  missingRequired: string[]
+  missingRecommended: string[]
+  checkedFields: string[]
+  error?: string
+}
+
 type TranscriptionSettings = {
   provider: 'lemonfox' | 'faster-whisper' | 'whisper'
   language: string
@@ -147,7 +158,7 @@ type ThresholdSettings = {
   defaultLowFan: ConfigSummary['defaultLowFan']
 }
 
-type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | 'feishuBase' | null
+type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | 'feishuBase' | 'feishuBaseCheck' | null
 
 type ConfigSummary = {
   accountCount: number
@@ -648,6 +659,7 @@ function App() {
   const [feishuBaseAppToken, setFeishuBaseAppToken] = useState('')
   const [feishuBaseTableId, setFeishuBaseTableId] = useState('')
   const [feishuBaseSyncMode, setFeishuBaseSyncMode] = useState('auto')
+  const [feishuBaseCheck, setFeishuBaseCheck] = useState<FeishuBaseCheckResult | undefined>()
   const [transcriptionProvider, setTranscriptionProvider] = useState('faster-whisper')
   const [transcriptionLanguage, setTranscriptionLanguage] = useState('zh')
   const [localModel, setLocalModel] = useState('small')
@@ -928,6 +940,7 @@ function App() {
       setFeishuBaseAppSecret('')
       setFeishuBaseAppToken('')
       setFeishuBaseTableId('')
+      setFeishuBaseCheck(undefined)
       setData((current) => ({
         ...current,
         config: {
@@ -940,6 +953,39 @@ function App() {
       }))
     } catch (error) {
       setLastRun(createRunError('POST /api/settings/feishu-base', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  async function checkFeishuBase() {
+    setRunning('feishuBaseCheck')
+    try {
+      const result = await api<{ ok: boolean; check: FeishuBaseCheckResult; feishuBase?: FeishuBaseState; error?: string }>('/api/settings/feishu-base/check', {
+        method: 'POST',
+      })
+      setFeishuBaseCheck(result.check)
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/settings/feishu-base/check',
+        code: result.ok ? 0 : 1,
+        stdout: result.check?.title || '',
+        stderr: result.check?.error || result.error || '',
+      })
+      if (result.feishuBase) {
+        setData((current) => ({
+          ...current,
+          config: {
+            ...current.config,
+            integrations: {
+              ...normalizeIntegrations(current.config),
+              feishuBase: result.feishuBase,
+            },
+          },
+        }))
+      }
+    } catch (error) {
+      setLastRun(createRunError('POST /api/settings/feishu-base/check', error))
     } finally {
       setRunning(null)
     }
@@ -1328,6 +1374,8 @@ function App() {
               appId={feishuBaseAppId}
               appSecret={feishuBaseAppSecret}
               appToken={feishuBaseAppToken}
+              checkFeishuBase={checkFeishuBase}
+              checkResult={feishuBaseCheck}
               feishuBase={integrations.feishuBase}
               running={running}
               saveFeishuBase={saveFeishuBase}
@@ -1974,6 +2022,8 @@ function FeishuBasePanel({
   appId,
   appSecret,
   appToken,
+  checkFeishuBase,
+  checkResult,
   feishuBase,
   running,
   saveFeishuBase,
@@ -1988,6 +2038,8 @@ function FeishuBasePanel({
   appId: string
   appSecret: string
   appToken: string
+  checkFeishuBase: () => void
+  checkResult?: FeishuBaseCheckResult
   feishuBase?: FeishuBaseState
   running: RunningAction
   saveFeishuBase: () => void
@@ -2065,6 +2117,19 @@ function FeishuBasePanel({
             </div>
           </div>
         )}
+        {checkResult && (
+          <div className={`field-check-result ${checkResult.ready ? 'is-ready' : 'is-blocked'}`}>
+            <div className="field-check-head">
+              {checkResult.ready ? <CheckCircle2 className="size-4" /> : <AlertTriangle className="size-4" />}
+              <strong>{checkResult.title}</strong>
+            </div>
+            {checkResult.error && <p>{checkResult.error}</p>}
+            {checkResult.missingConfig.length > 0 && <p>缺少配置：{checkResult.missingConfig.join('、')}</p>}
+            {checkResult.missingRequired.length > 0 && <p>缺少必需字段：{checkResult.missingRequired.join('、')}</p>}
+            {checkResult.missingRecommended.length > 0 && <p>建议补充字段：{checkResult.missingRecommended.slice(0, 10).join('、')}{checkResult.missingRecommended.length > 10 ? '等' : ''}</p>}
+            {checkResult.checkedFields.length > 0 && <span>已检查 {checkResult.checkedFields.length} 个字段</span>}
+          </div>
+        )}
         <div className="form-grid">
           <Field label="同步方式" help="推荐自动模式。OpenAPI 更稳定；lark-cli 适合本机已有飞书授权的临时兜底。">
             <Select value={syncMode} onChange={setSyncMode} options={feishuBaseSyncModeOptions} />
@@ -2082,10 +2147,16 @@ function FeishuBasePanel({
             <Input value={appSecret} onChange={(event) => setAppSecret(event.target.value)} placeholder={feishuBase?.appSecretConfigured ? '已配置，留空不修改' : '仅在本机保存'} type="password" />
           </Field>
         </div>
-        <Button className="full-action" variant="secondary" onClick={saveFeishuBase} disabled={running !== null}>
-          {running === 'feishuBase' ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
-          保存飞书结果库配置
-        </Button>
+        <div className="field-guide-actions">
+          <Button variant="ghost" onClick={checkFeishuBase} disabled={running !== null}>
+            {running === 'feishuBaseCheck' ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+            检查飞书表
+          </Button>
+          <Button variant="secondary" onClick={saveFeishuBase} disabled={running !== null}>
+            {running === 'feishuBase' ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            保存配置
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )

@@ -6,7 +6,7 @@ import { constants as fsConstants } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { feishuBaseStatusFromEnv, maskSecret, normalizeFeishuBaseConfigInput } from './server/feishu-base-config.mjs'
+import { buildFeishuBaseCheckResult, feishuBaseStatusFromEnv, maskSecret, normalizeFeishuBaseConfigInput } from './server/feishu-base-config.mjs'
 import { buildIpOperationCard } from './server/ip-opportunity.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -1864,6 +1864,36 @@ app.post('/api/settings/feishu-base', async (req, res) => {
   Object.assign(process.env, updates)
   const envValues = await readLocalEnvValues()
   res.json({ ok: true, feishuBase: feishuBaseStatus(envValues) })
+})
+
+app.post('/api/settings/feishu-base/check', async (_req, res) => {
+  const envValues = await readLocalEnvValues()
+  const status = feishuBaseStatus(envValues)
+  const settings = feishuBaseSettings(envValues)
+  if (!status.setupGuide?.ready) {
+    res.json({ ok: false, check: buildFeishuBaseCheckResult(status), feishuBase: status })
+    return
+  }
+  if (!settings.openApiConfigured) {
+    res.json({
+      ok: false,
+      check: buildFeishuBaseCheckResult(status, [], '字段检查需要配置 OpenAPI App ID 和 App Secret。'),
+      feishuBase: status,
+    })
+    return
+  }
+  try {
+    const token = await feishuTenantAccessToken(settings)
+    const fieldNames = await openApiTableFieldNames(settings, token)
+    const check = buildFeishuBaseCheckResult(status, fieldNames)
+    res.json({ ok: check.ready, check, feishuBase: status })
+  } catch (error) {
+    res.json({
+      ok: false,
+      check: buildFeishuBaseCheckResult(status, [], error instanceof Error ? error.message : String(error)),
+      feishuBase: status,
+    })
+  }
 })
 
 app.post('/api/settings/thresholds', async (req, res) => {
