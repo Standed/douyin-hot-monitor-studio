@@ -1,26 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  --background: #020817;
-  --panel: #0b1223;
-  --panel-2: #111827;
-  --panel-3: #121a2d;
-  --card: rgba(20, 27, 44, 0.78);
-  --card-solid: #121a2d;
-  --border: rgba(148, 163, 184, 0.16);
-  --border-strong: rgba(34, 211, 238, 0.32);
-  --foreground: #e5edf6;
-  --muted: #8190a7;
-  --muted-2: #5f6f86;
-  --accent: #00d5ff;
-  --accent-contrast: #02111b;
-  --accent-hover: #5eeaff;
-  --accent-soft: rgba(0, 213, 255, 0.14);
-  --accent-2: #00e0a4;
+  --background: #101311;
+  --panel: #151916;
+  --panel-2: #171c19;
+  --panel-3: #202720;
+  --card: rgba(23, 28, 25, 0.88);
+  --card-solid: #171c19;
+  --border: rgba(164, 174, 166, 0.18);
+  --border-strong: rgba(50, 183, 158, 0.34);
+  --foreground: #f1f5f2;
+  --muted: #a4aea6;
+  --muted-2: #77837b;
+  --accent: #32b79e;
+  --accent-contrast: #111612;
+  --accent-hover: #5ee0c9;
+  --accent-soft: rgba(50, 183, 158, 0.14);
+  --accent-2: #7dd3b7;
   --accent-3: #fbbf24;
   --danger: #f59e0b;
   --shadow: 0 24px 70px rgba(0, 0, 0, 0.32);
-  --ring: rgba(0, 213, 255, 0.28);
+  --ring: rgba(50, 183, 158, 0.28);
   --control-bg: rgba(2, 8, 23, 0.34);
   --control-hover: rgba(255, 255, 255, 0.08);
   --switch-track: rgba(100, 116, 139, 0.86);
@@ -41,25 +41,25 @@
 }
 
 :root[data-theme="light"] {
-  --background: #eef3f8;
-  --panel: #ffffff;
-  --panel-2: #f6f8fb;
-  --panel-3: #eef3f8;
-  --card: rgba(255, 255, 255, 0.88);
-  --card-solid: #ffffff;
-  --border: rgba(30, 41, 59, 0.13);
-  --border-strong: rgba(14, 116, 144, 0.28);
-  --foreground: #102033;
-  --muted: #66758a;
-  --muted-2: #8a96a6;
-  --accent: #007fa3;
+  --background: #f4f5f2;
+  --panel: #fffefa;
+  --panel-2: #f7f8f5;
+  --panel-3: #ecefeb;
+  --card: rgba(255, 254, 250, 0.9);
+  --card-solid: #fffefa;
+  --border: rgba(21, 23, 24, 0.13);
+  --border-strong: rgba(8, 121, 110, 0.28);
+  --foreground: #151718;
+  --muted: #666f72;
+  --muted-2: #8b938f;
+  --accent: #08796e;
   --accent-contrast: #ffffff;
-  --accent-hover: #006f90;
-  --accent-soft: rgba(0, 127, 163, 0.1);
-  --accent-2: #087f5b;
+  --accent-hover: #066b62;
+  --accent-soft: rgba(8, 121, 110, 0.11);
+  --accent-2: #0f8a66;
   --accent-3: #b56a00;
   --shadow: 0 18px 46px rgba(15, 23, 42, 0.1);
-  --ring: rgba(0, 127, 163, 0.22);
+  --ring: rgba(8, 121, 110, 0.22);
   --control-bg: rgba(255, 255, 255, 0.84);
   --control-hover: rgba(0, 127, 163, 0.08);
   --switch-track: rgba(148, 163, 184, 0.62);
@@ -80,19 +80,13 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  font-size: clamp(14px, 0.74vw + 11px, 16px);
+  font-size: 15px;
   overflow-x: hidden;
-  background:
-    radial-gradient(circle at 10% 0%, rgba(0, 213, 255, 0.14), transparent 28%),
-    radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.16), transparent 32%),
-    linear-gradient(180deg, #050a18 0%, #020817 44%, #030816 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel-3) 72%, transparent), var(--background) 340px);
 }
 
 :root[data-theme="light"] body {
-  background:
-    radial-gradient(circle at 8% 0%, rgba(0, 127, 163, 0.13), transparent 28%),
-    radial-gradient(circle at 100% 0%, rgba(8, 127, 91, 0.12), transparent 30%),
-    linear-gradient(180deg, #f7fafc 0%, #eef3f8 48%, #e8eef5 100%);
+  background: linear-gradient(180deg, #f7f8f5 0%, var(--background) 48%, #ecefeb 100%);
 }
 
 button,
@@ -119,8 +113,8 @@ a {
   display: flex;
   height: 100vh;
   flex-direction: column;
-  border-right: 1px solid rgba(148, 163, 184, 0.12);
-  background: linear-gradient(180deg, rgba(8, 13, 27, 0.98), rgba(4, 9, 20, 0.96));
+  border-right: 1px solid rgba(164, 174, 166, 0.16);
+  background: linear-gradient(180deg, rgba(21, 25, 22, 0.98), rgba(16, 19, 17, 0.96));
   box-shadow: 22px 0 60px rgba(0, 0, 0, 0.32);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -137,21 +131,16 @@ a {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: clamp(76px, 5.3vw, 98px);
+  min-height: 76px;
   padding: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 16px;
-  background:
-    radial-gradient(circle at 16% 18%, rgba(34, 211, 238, 0.16), transparent 34%),
-    linear-gradient(145deg, rgba(15, 23, 42, 0.96), rgba(8, 16, 31, 0.92));
+  border: 1px solid rgba(164, 174, 166, 0.18);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(23, 28, 25, 0.96), rgba(16, 19, 17, 0.92));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 14px 34px rgba(0, 0, 0, 0.22);
 }
 
 :root[data-theme="light"] .brand-card {
-  background:
-    radial-gradient(circle at 16% 18%, rgba(8, 145, 178, 0.13), transparent 36%),
-    linear-gradient(145deg, rgba(255, 255, 255, 0.92), rgba(242, 248, 250, 0.82)),
-    #ffffff;
+  background: linear-gradient(145deg, rgba(255, 254, 250, 0.94), rgba(247, 248, 245, 0.86)), #fffefa;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 12px 30px rgba(15, 23, 42, 0.08);
 }
 
@@ -162,10 +151,10 @@ a {
   width: 42px;
   height: 42px;
   flex: 0 0 auto;
-  color: #03131d;
-  background: linear-gradient(135deg, #67e8f9, #10b981);
-  border-radius: 12px;
-  box-shadow: 0 12px 26px rgba(6, 182, 212, 0.22);
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 12px 26px rgba(8, 121, 110, 0.22);
 }
 
 .brand-copy {
@@ -177,9 +166,15 @@ a {
 
 .brand-copy strong {
   color: var(--foreground);
-  font-size: clamp(18px, 1.1vw, 22px);
+  font-size: 18px;
   font-weight: 950;
   line-height: 1.15;
+}
+
+.brand-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .nav-list {
@@ -201,7 +196,7 @@ a {
   color: #718199;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 14px;
+  border-radius: 8px;
   cursor: pointer;
   font-weight: 800;
   text-align: left;
@@ -223,9 +218,9 @@ a {
 
 .nav-item.active {
   color: var(--accent);
-  background: linear-gradient(135deg, rgba(0, 213, 255, 0.18), rgba(0, 224, 164, 0.08));
-  border-color: rgba(0, 213, 255, 0.35);
-  box-shadow: inset 0 0 18px rgba(0, 213, 255, 0.08), 0 14px 28px rgba(0, 213, 255, 0.08);
+  background: var(--accent-soft);
+  border-color: var(--border-strong);
+  box-shadow: inset 0 0 18px rgba(50, 183, 158, 0.08), 0 14px 28px rgba(8, 121, 110, 0.08);
 }
 
 .sidebar-bottom {
@@ -301,6 +296,7 @@ a {
 :root[data-theme="light"] .terminal-card,
 :root[data-theme="light"] .reports-card,
 :root[data-theme="light"] .alerts-card,
+:root[data-theme="light"] .base-guide-card,
 :root[data-theme="light"] .about-card,
 :root[data-theme="light"] .learning-card {
   background:
@@ -1742,13 +1738,30 @@ a {
   grid-template-columns: 1fr;
 }
 
+.base-guide-card,
 .history-guide-card {
   background:
     linear-gradient(135deg, rgba(0, 213, 255, 0.08), rgba(0, 224, 164, 0.04)),
     rgba(13, 20, 34, 0.84);
 }
 
+.base-guide-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.base-status-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.4fr) minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+
 .history-meta,
+.workflow-lane,
 .deployment-steps {
   display: flex;
   flex-wrap: wrap;
@@ -1757,6 +1770,7 @@ a {
 }
 
 .history-meta span,
+.workflow-lane span,
 .deployment-steps span {
   display: inline-flex;
   min-height: 30px;
@@ -1768,6 +1782,12 @@ a {
   border-radius: 8px;
   font-size: clamp(12px, 0.72vw, 13px);
   font-weight: 800;
+}
+
+.workflow-lane span {
+  color: var(--accent-2);
+  background: rgba(50, 183, 158, 0.1);
+  border-color: rgba(50, 183, 158, 0.18);
 }
 
 .report-row-card .card-content {
@@ -1811,6 +1831,7 @@ a {
   font-weight: 900;
 }
 
+:root[data-theme="light"] .base-guide-card,
 :root[data-theme="light"] .history-guide-card {
   background:
     linear-gradient(135deg, rgba(0, 127, 163, 0.08), rgba(8, 127, 91, 0.04)),
@@ -1825,6 +1846,7 @@ a {
 :root[data-theme="light"] .report-row-card span,
 :root[data-theme="light"] .report-row-card time,
 :root[data-theme="light"] .history-meta span,
+:root[data-theme="light"] .workflow-lane span,
 :root[data-theme="light"] .deployment-steps span {
   color: #51637a;
 }
@@ -1978,6 +2000,7 @@ a {
   .asset-decision,
   .account-run-stats,
   .account-result-metrics,
+  .base-status-row,
   .account-editor-head,
   .account-editor-row,
   .account-actions,
