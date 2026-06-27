@@ -7,6 +7,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { feishuBaseStatusFromEnv, maskSecret, normalizeFeishuBaseConfigInput } from './server/feishu-base-config.mjs'
+import { buildIpOperationCard } from './server/ip-opportunity.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const defaultMonitorDir = path.resolve(__dirname, '../douyin-monitor')
@@ -51,7 +52,7 @@ const collaborationFields = new Set([
   '发布链接',
   '复盘结论',
 ])
-const extendedFeishuFields = new Set(['适配账号', '内容类型', '选题句', '写作角度', '素材缺口', '成稿链接', '发布链接', '复盘结论'])
+const extendedFeishuFields = new Set(['适配账号', '内容类型', '选题句', '写作角度', '素材缺口', '成稿链接', '发布链接', '复盘结论', 'IP操盘判断', '内容形式', '选题来源', '下一步动作'])
 const dailyRunState = {
   running: false,
   lastDateKey: '',
@@ -187,19 +188,32 @@ async function latestRows(reports) {
   const latestJson = reports.find((report) => report.type === 'json')
   if (!latestJson) return []
   const rows = await readJson(latestJson.path, [])
-  return Array.isArray(rows) ? rows : []
+  return Array.isArray(rows) ? enrichReportRows(rows, kindFromReportName(latestJson.name)) : []
 }
 
 async function latestRowsByKind(reports, kind) {
   const latestJson = reports.find((report) => report.type === 'json' && report.name.includes(`_${kind}`))
   if (!latestJson) return []
   const rows = await readJson(latestJson.path, [])
-  return Array.isArray(rows) ? rows : []
+  return Array.isArray(rows) ? enrichReportRows(rows, kindFromReportName(latestJson.name, kind)) : []
 }
 
 async function reportRows(reportPath) {
   const rows = await readJson(reportPath, [])
-  return Array.isArray(rows) ? rows : []
+  return Array.isArray(rows) ? enrichReportRows(rows, kindFromReportName(path.basename(reportPath))) : []
+}
+
+function kindFromReportName(name = '', fallback = '') {
+  if (String(name).includes('account_new')) return 'account'
+  if (String(name).includes('lowfan')) return 'lowfan'
+  return fallback || ''
+}
+
+function enrichReportRows(rows = [], kind = '') {
+  return rows.map((row, index) => ({
+    ...row,
+    ip_operation: buildIpOperationCard(kind || (row.source_account ? 'account' : 'lowfan'), row, index),
+  }))
 }
 
 function summarizeAccounts(config) {
@@ -841,27 +855,15 @@ function materialSummary(row) {
 }
 
 function contentTypeFromRow(row = {}, kind = '') {
-  const text = [row.keyword, row.title, row.hit_reason, row.source_account].join(' ')
-  if (/教程|步骤|实操|工具|工作流/.test(text)) return '工具实操'
-  if (/短剧|剧本|漫剧|视频号/.test(text)) return 'AI短剧'
-  if (/账号|对标|拆解|爆款/.test(text)) return '账号对标'
-  return kind === 'lowfan' ? '低粉爆款' : '对标观察'
+  return buildIpOperationCard(kind, row).contentForm
 }
 
 function topicSeed(row = {}, kind = '') {
-  const title = truncateText(row.title || '', 80)
-  if (!title) return ''
-  if (kind === 'lowfan') return `为什么这条低粉内容能跑出来：${title}`
-  return `这个对标账号的新内容值得拆：${title}`
+  return buildIpOperationCard(kind, row).topicLine
 }
 
 function operationSuggestion(row, kind, index) {
-  if (kind === 'account') {
-    const rank = Number(index) + 1
-    return `来自监控账号池第 ${rank} 条新素材。建议先判断选题角度、标题结构、口播节奏和评论区反馈；需要创作复用时再下载无水印视频或提取文稿。`
-  }
-  const keyword = row.keyword ? `关键词“${row.keyword}”` : '本次关键词'
-  return `来自${keyword}低粉爆款搜索。建议优先看标题钩子、封面承诺、互动异常点和转发理由；适合沉淀到选题池后再安排改写或视频创作。`
+  return buildIpOperationCard(kind, row, index).nextAction
 }
 
 async function feishuTenantAccessToken(settings) {
@@ -885,6 +887,7 @@ async function feishuRecordFields(kind, result, row, index, envValues = {}, opti
   const runId = reportRunId(reports)
   const materialKind = kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控'
   const transcriptText = await readTextPreview(row.transcript_path, 3500)
+  const ipCard = buildIpOperationCard(kind, row, index)
   const fields = {
     去重键: dedupeKeyForRow(kind, row),
     运行ID: runId,
@@ -896,10 +899,14 @@ async function feishuRecordFields(kind, result, row, index, envValues = {}, opti
     口播正文: transcriptText,
     运营建议: operationSuggestion(row, kind, index),
     适配账号: fitAccountLabels(row),
-    内容类型: contentTypeFromRow(row, kind),
-    选题句: topicSeed(row, kind),
-    写作角度: operationSuggestion(row, kind, index),
-    素材缺口: transcriptText ? '可先结合口播文稿、评论区和封面继续人工判断。' : '建议补充口播文稿、评论区截图或创作者主页信息。',
+    内容类型: ipCard.contentForm,
+    内容形式: ipCard.contentForm,
+    选题来源: ipCard.sourceLabel,
+    选题句: ipCard.topicLine,
+    写作角度: ipCard.nextAction,
+    IP操盘判断: truncateText(`${ipCard.operatingView}${ipCard.evidenceLine ? ` 证据：${ipCard.evidenceLine}` : ''}`, 700),
+    下一步动作: ipCard.nextAction,
+    素材缺口: ipCard.materialGap,
     成稿链接: '',
     发布链接: '',
     复盘结论: '',

@@ -200,6 +200,19 @@ type ReportRow = {
   download_error?: string
   viral_score?: number
   hit_reason?: string
+  ip_operation?: {
+    sourceLabel: string
+    contentForm: string
+    topicLine: string
+    operatingView: string
+    nextAction: string
+    materialGap: string
+    evidenceLine?: string
+    decisionChecklist?: Array<{
+      label: string
+      detail: string
+    }>
+  }
 }
 
 type DashboardData = {
@@ -2571,6 +2584,7 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
   const transcriptDownloadUrl = assetDownloadUrl(item.transcript_path)
   const srtUrl = assetViewUrl(item.srt_path)
   const isBenchmark = Boolean(item.source_account)
+  const ipOperation = item.ip_operation
 
   return (
     <article className="timeline-row">
@@ -2613,6 +2627,20 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
               ? '先运行一次搜索或账号监控，命中的素材会按时间线展示在这里。'
               : item.hit_reason || (isBenchmark ? `对标账号最新作品，可优先记录选题角度、标题结构和口播节奏。素材序号 ${index + 1}。` : `互动数据超过监控阈值，适合做低粉爆款拆解。素材序号 ${index + 1}。`)}
           </div>
+          {!empty && ipOperation && (
+            <div className="ip-operation-box">
+              <div className="ip-operation-head">
+                <Badge>{ipOperation.sourceLabel}</Badge>
+                <span>{ipOperation.contentForm}</span>
+              </div>
+              <strong>{ipOperation.topicLine}</strong>
+              <p>{ipOperation.operatingView}</p>
+              <div className="ip-operation-next">
+                <span>下一步</span>
+                <em>{ipOperation.nextAction}</em>
+              </div>
+            </div>
+          )}
 
           <div className="card-actions">
             {item.url && (

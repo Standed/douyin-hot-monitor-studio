@@ -1537,6 +1537,61 @@ a {
   font-size: clamp(13px, 0.82vw, 15px);
 }
 
+.ip-operation-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 213, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(0, 213, 255, 0.08);
+}
+
+.ip-operation-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ip-operation-head span {
+  color: #9fb0c5;
+  font-size: clamp(12px, 0.72vw, 13px);
+  font-weight: 900;
+}
+
+.ip-operation-box > strong {
+  color: #e8f4ff;
+  font-size: clamp(13px, 0.82vw, 15px);
+  line-height: 1.55;
+}
+
+.ip-operation-box p {
+  margin: 0;
+  color: #8ea0b8;
+  line-height: 1.65;
+  font-size: clamp(12px, 0.74vw, 14px);
+}
+
+.ip-operation-next {
+  display: grid;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.ip-operation-next span {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.ip-operation-next em {
+  color: #c6d3e5;
+  font-style: normal;
+  line-height: 1.6;
+  font-size: clamp(12px, 0.74vw, 14px);
+}
+
 .card-actions {
   flex-wrap: wrap;
   gap: 10px;
