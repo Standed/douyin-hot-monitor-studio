@@ -29,6 +29,39 @@ export function normalizeFeishuBaseConfigInput(value = {}) {
   return updates
 }
 
+export function buildFeishuBaseSetupGuide(status = {}) {
+  const missing = []
+  if (!status.appTokenConfigured) {
+    missing.push({
+      key: 'appToken',
+      step: '填写飞书 Base Token',
+      reason: '用于定位团队协作的多维表格结果库。',
+    })
+  }
+  if (!status.tableIdConfigured) {
+    missing.push({
+      key: 'tableId',
+      step: '填写飞书 Table ID',
+      reason: '用于定位要写入的具体数据表。',
+    })
+  }
+  if (!status.openApiConfigured) {
+    missing.push({
+      key: 'openApi',
+      step: '填写飞书应用 App ID 和 App Secret',
+      reason: '正式团队同步建议使用 OpenAPI，避免依赖个人 lark-cli 登录态。',
+    })
+  }
+
+  return {
+    ready: missing.length === 0,
+    title: missing.length ? `还差 ${missing.length} 项即可稳定写入飞书` : '飞书结果库已具备团队同步配置',
+    missingKeys: missing.map((item) => item.key),
+    steps: missing.map((item) => item.step),
+    reasons: missing.map((item) => item.reason),
+  }
+}
+
 export function feishuBaseStatusFromEnv(envValues = {}) {
   const appId = envValues.FEISHU_BASE_APP_ID || envValues.LARK_APP_ID || ''
   const appSecret = envValues.FEISHU_BASE_APP_SECRET || envValues.LARK_APP_SECRET || ''
@@ -37,7 +70,7 @@ export function feishuBaseStatusFromEnv(envValues = {}) {
   const syncMode = normalizeFeishuBaseSyncMode(envValues.FEISHU_BASE_SYNC_MODE)
   const openApiConfigured = Boolean(appId && appSecret)
   const configured = Boolean(appToken && tableId && (openApiConfigured || syncMode === 'auto' || syncMode === 'lark-cli'))
-  return {
+  const status = {
     configured,
     openApiConfigured,
     syncMode,
@@ -52,5 +85,9 @@ export function feishuBaseStatusFromEnv(envValues = {}) {
       appToken: maskSecret(appToken),
       tableId: maskSecret(tableId),
     },
+  }
+  return {
+    ...status,
+    setupGuide: buildFeishuBaseSetupGuide(status),
   }
 }

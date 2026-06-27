@@ -1760,6 +1760,63 @@ a {
   margin-top: 14px;
 }
 
+.setup-guide {
+  margin: 12px 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.setup-guide.is-ready {
+  border-color: rgba(0, 224, 164, 0.22);
+  background: rgba(0, 224, 164, 0.08);
+}
+
+.setup-guide-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #f8d38a;
+}
+
+.setup-guide.is-ready .setup-guide-head {
+  color: var(--accent-2);
+}
+
+.setup-guide-head svg {
+  flex: 0 0 auto;
+}
+
+.setup-guide-head strong {
+  font-size: clamp(12px, 0.74vw, 13px);
+}
+
+.setup-guide ol {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.setup-guide li {
+  color: #dbe7f7;
+  line-height: 1.55;
+  font-size: clamp(12px, 0.72vw, 13px);
+}
+
+.setup-guide li span {
+  display: block;
+  font-weight: 900;
+}
+
+.setup-guide li em {
+  display: block;
+  margin-top: 2px;
+  color: #90a1b8;
+  font-style: normal;
+}
+
 .history-meta,
 .workflow-lane,
 .deployment-steps {

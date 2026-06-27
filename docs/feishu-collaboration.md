@@ -104,6 +104,7 @@ DY_HOT_PUBLIC_URL=https://douyin.aizao.ai
 
 - 留空的密钥字段不会覆盖已有配置，方便只调整同步方式或补单个字段。
 - 页面配置状态和输入框只展示是否已配置和掩码，不在状态文案里展示完整 App Secret、Base Token 或 Table ID；“打开飞书结果库”链接会使用 Base URL。
+- 页面会显示“还差几项”的配置清单，让运营或管理员知道下一步该补 Base Token、Table ID 还是 OpenAPI 凭证。
 - `auto` 模式优先使用 OpenAPI；如果缺少 OpenAPI 凭证，才回落到本机 `lark-cli`。正式协作建议配齐 OpenAPI，避免依赖个人登录状态。
 
 ## 协作字段保护

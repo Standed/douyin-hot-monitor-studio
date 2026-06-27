@@ -87,6 +87,13 @@ type FeishuBaseState = {
     appToken?: string
     tableId?: string
   }
+  setupGuide?: {
+    ready: boolean
+    title: string
+    missingKeys: string[]
+    steps: string[]
+    reasons: string[]
+  }
 }
 
 type TranscriptionSettings = {
@@ -302,6 +309,13 @@ const defaultData: DashboardData = {
         tableIdConfigured: false,
         baseUrl: '',
         masked: {},
+        setupGuide: {
+          ready: false,
+          title: '还差 3 项即可稳定写入飞书',
+          missingKeys: ['appToken', 'tableId', 'openApi'],
+          steps: ['填写飞书 Base Token', '填写飞书 Table ID', '填写飞书应用 App ID 和 App Secret'],
+          reasons: ['用于定位团队协作的多维表格结果库。', '用于定位要写入的具体数据表。', '正式团队同步建议使用 OpenAPI，避免依赖个人 lark-cli 登录态。'],
+        },
       },
       parserConfig: {
         configured: false,
@@ -1959,6 +1973,7 @@ function FeishuBasePanel({
     feishuBase?.tableIdConfigured ? '' : 'Table ID',
     syncMode === 'openapi' && !feishuBase?.openApiConfigured ? 'App ID / Secret' : '',
   ].filter(Boolean)
+  const setupGuide = feishuBase?.setupGuide
 
   return (
     <Card className="control-card settings-card">
@@ -1975,6 +1990,24 @@ function FeishuBasePanel({
               <ExternalLink className="size-4" />
               打开飞书结果库
             </a>
+          </div>
+        )}
+        {setupGuide && (
+          <div className={`setup-guide ${setupGuide.ready ? 'is-ready' : ''}`}>
+            <div className="setup-guide-head">
+              {setupGuide.ready ? <CheckCircle2 className="size-4" /> : <AlertTriangle className="size-4" />}
+              <strong>{setupGuide.title}</strong>
+            </div>
+            {!setupGuide.ready && (
+              <ol>
+                {setupGuide.steps.map((step, index) => (
+                  <li key={step}>
+                    <span>{step}</span>
+                    <em>{setupGuide.reasons[index]}</em>
+                  </li>
+                ))}
+              </ol>
+            )}
           </div>
         )}
         <div className="form-grid">
