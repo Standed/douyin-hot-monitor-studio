@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildFeishuBaseSetupGuide, feishuBaseStatusFromEnv, normalizeFeishuBaseConfigInput } from '../server/feishu-base-config.mjs'
+import { buildFeishuBaseFieldGuide, buildFeishuBaseSetupGuide, feishuBaseStatusFromEnv, normalizeFeishuBaseConfigInput } from '../server/feishu-base-config.mjs'
 
 test('normalizes Feishu Base config input without leaking secrets', () => {
   const input = normalizeFeishuBaseConfigInput({
@@ -63,4 +63,20 @@ test('builds a user-facing setup guide for team Feishu sync', () => {
   assert.equal(readyGuide.ready, true)
   assert.deepEqual(readyGuide.missingKeys, [])
   assert.equal(readyGuide.title, '飞书结果库已具备团队同步配置')
+})
+
+test('builds a Feishu Base field guide for MVP setup', () => {
+  const guide = buildFeishuBaseFieldGuide()
+
+  assert.equal(guide.required.length, 1)
+  assert.equal(guide.required[0].name, '去重键')
+  assert.match(guide.required[0].reason, /安全去重/)
+  assert.deepEqual(guide.groups.map((group) => group.label), ['运营协作', 'IP操盘判断', '资产与报告'])
+
+  const recommendedNames = guide.groups.flatMap((group) => group.fields.map((field) => field.name))
+  assert.ok(recommendedNames.includes('IP操盘判断'))
+  assert.ok(recommendedNames.includes('下一步动作'))
+  assert.ok(recommendedNames.includes('口播正文'))
+  assert.match(guide.copyText, /必需字段：去重键/)
+  assert.match(guide.copyText, /IP操盘判断/)
 })

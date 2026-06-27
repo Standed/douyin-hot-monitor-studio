@@ -94,6 +94,20 @@ type FeishuBaseState = {
     steps: string[]
     reasons: string[]
   }
+  fieldGuide?: {
+    required: Array<{
+      name: string
+      reason: string
+    }>
+    groups: Array<{
+      label: string
+      fields: Array<{
+        name: string
+        reason: string
+      }>
+    }>
+    copyText: string
+  }
 }
 
 type TranscriptionSettings = {
@@ -328,6 +342,11 @@ const defaultData: DashboardData = {
           missingKeys: ['appToken', 'tableId', 'openApi'],
           steps: ['填写飞书 Base Token', '填写飞书 Table ID', '填写飞书应用 App ID 和 App Secret'],
           reasons: ['用于定位团队协作的多维表格结果库。', '用于定位要写入的具体数据表。', '正式团队同步建议使用 OpenAPI，避免依赖个人 lark-cli 登录态。'],
+        },
+        fieldGuide: {
+          required: [{ name: '去重键', reason: '用于安全去重。' }],
+          groups: [],
+          copyText: '必需字段：去重键',
         },
       },
       parserConfig: {
@@ -1987,6 +2006,7 @@ function FeishuBasePanel({
     syncMode === 'openapi' && !feishuBase?.openApiConfigured ? 'App ID / Secret' : '',
   ].filter(Boolean)
   const setupGuide = feishuBase?.setupGuide
+  const fieldGuide = feishuBase?.fieldGuide
 
   return (
     <Card className="control-card settings-card">
@@ -2021,6 +2041,28 @@ function FeishuBasePanel({
                 ))}
               </ol>
             )}
+          </div>
+        )}
+        {fieldGuide && (
+          <div className="field-guide">
+            <div className="field-guide-head">
+              <strong>飞书建表字段</strong>
+              <span>先建必需字段，再按需补推荐字段</span>
+            </div>
+            <div className="field-guide-required">
+              <span>必需</span>
+              {fieldGuide.required.map((field) => (
+                <strong key={field.name}>{field.name}</strong>
+              ))}
+            </div>
+            <div className="field-guide-groups">
+              {fieldGuide.groups.map((group) => (
+                <div className="field-guide-group" key={group.label}>
+                  <span>{group.label}</span>
+                  <p>{group.fields.map((field) => field.name).join('、')}</p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         <div className="form-grid">

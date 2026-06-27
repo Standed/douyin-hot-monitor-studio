@@ -62,6 +62,49 @@ export function buildFeishuBaseSetupGuide(status = {}) {
   }
 }
 
+export function buildFeishuBaseFieldGuide() {
+  const required = [
+    {
+      name: '去重键',
+      reason: '用于按素材唯一键安全去重；缺少它时同步会停止，避免重复追加。',
+    },
+  ]
+  const groups = [
+    {
+      label: '运营协作',
+      fields: [
+        { name: '标题', reason: '快速判断素材主题。' },
+        { name: '素材摘要', reason: '用一句话看懂素材价值。' },
+        { name: '处理状态', reason: '标记待处理、已入选、已放弃。' },
+        { name: '负责人', reason: '方便团队认领。' },
+      ],
+    },
+    {
+      label: 'IP操盘判断',
+      fields: [
+        { name: '选题句', reason: '沉淀一句话选题。' },
+        { name: '内容形式', reason: '判断是知识口播、AI短剧、工具实操等。' },
+        { name: 'IP操盘判断', reason: '记录业务相关性和内容判断口径。' },
+        { name: '下一步动作', reason: '明确补素材、改写或进入成稿。' },
+      ],
+    },
+    {
+      label: '资产与报告',
+      fields: [
+        { name: '原视频链接', reason: '回看原始素材。' },
+        { name: '口播正文', reason: '用于拆标题、钩子和表达结构。' },
+        { name: '无水印视频', reason: '归档可下载资产。' },
+        { name: 'Markdown报告', reason: '回看本次运行报告。' },
+      ],
+    },
+  ]
+  const copyText = [
+    `必需字段：${required.map((field) => field.name).join('、')}`,
+    ...groups.map((group) => `${group.label}：${group.fields.map((field) => field.name).join('、')}`),
+  ].join('\n')
+  return { required, groups, copyText }
+}
+
 export function feishuBaseStatusFromEnv(envValues = {}) {
   const appId = envValues.FEISHU_BASE_APP_ID || envValues.LARK_APP_ID || ''
   const appSecret = envValues.FEISHU_BASE_APP_SECRET || envValues.LARK_APP_SECRET || ''
@@ -89,5 +132,6 @@ export function feishuBaseStatusFromEnv(envValues = {}) {
   return {
     ...status,
     setupGuide: buildFeishuBaseSetupGuide(status),
+    fieldGuide: buildFeishuBaseFieldGuide(),
   }
 }

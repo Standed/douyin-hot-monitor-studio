@@ -1872,6 +1872,74 @@ a {
   font-style: normal;
 }
 
+.field-guide {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 14px;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.field-guide-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.field-guide-head strong {
+  color: #e8f4ff;
+  font-size: clamp(13px, 0.8vw, 14px);
+}
+
+.field-guide-head span {
+  color: #7f90a6;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.field-guide-required {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-guide-required span,
+.field-guide-group span {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.field-guide-required strong {
+  padding: 5px 8px;
+  color: #00131a;
+  background: var(--accent);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.field-guide-groups {
+  display: grid;
+  gap: 8px;
+}
+
+.field-guide-group {
+  display: grid;
+  gap: 3px;
+}
+
+.field-guide-group p {
+  margin: 0;
+  color: #c6d3e5;
+  line-height: 1.55;
+  font-size: clamp(12px, 0.72vw, 13px);
+}
+
 .history-meta,
 .workflow-lane,
 .deployment-steps {
