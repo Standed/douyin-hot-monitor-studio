@@ -70,7 +70,55 @@ type AccountDraft = {
 
 type IntegrationState = {
   configured: boolean
-  masked: string
+}
+
+type FeishuBaseState = {
+  configured: boolean
+  openApiConfigured?: boolean
+  syncMode?: string
+  appIdConfigured?: boolean
+  appSecretConfigured?: boolean
+  appTokenConfigured?: boolean
+  tableIdConfigured?: boolean
+  baseUrl: string
+  masked?: {
+    appId?: string
+    appSecret?: string
+    appToken?: string
+    tableId?: string
+  }
+  setupGuide?: {
+    ready: boolean
+    title: string
+    missingKeys: string[]
+    steps: string[]
+    reasons: string[]
+  }
+  fieldGuide?: {
+    required: Array<{
+      name: string
+      reason: string
+    }>
+    groups: Array<{
+      label: string
+      fields: Array<{
+        name: string
+        reason: string
+      }>
+    }>
+    copyText: string
+  }
+}
+
+type FeishuBaseCheckResult = {
+  ready: boolean
+  status: string
+  title: string
+  missingConfig: string[]
+  missingRequired: string[]
+  missingRecommended: string[]
+  checkedFields: string[]
+  error?: string
 }
 
 type TranscriptionSettings = {
@@ -110,7 +158,7 @@ type ThresholdSettings = {
   defaultLowFan: ConfigSummary['defaultLowFan']
 }
 
-type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | null
+type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | 'feishuBase' | 'feishuBaseCheck' | null
 
 type ConfigSummary = {
   accountCount: number
@@ -140,6 +188,7 @@ type ConfigSummary = {
     transcription: TranscriptionSettings
     runtime?: RuntimeSettings
     parserConfig?: ParserConfigStatus
+    feishuBase?: FeishuBaseState
   }
 }
 
@@ -176,6 +225,19 @@ type ReportRow = {
   download_error?: string
   viral_score?: number
   hit_reason?: string
+  ip_operation?: {
+    sourceLabel: string
+    contentForm: string
+    topicLine: string
+    operatingView: string
+    nextAction: string
+    materialGap: string
+    evidenceLine?: string
+    decisionChecklist?: Array<{
+      label: string
+      detail: string
+    }>
+  }
 }
 
 type DashboardData = {
@@ -197,6 +259,19 @@ type RunResult = {
   stderr: string
   parsed?: Record<string, unknown> | null
   rows?: ReportRow[]
+  baseSync?: SyncResult
+  contentOsSync?: SyncResult
+  notification?: Record<string, unknown>
+}
+
+type SyncResult = {
+  configured?: boolean
+  synced?: boolean
+  count?: number
+  created?: number
+  updated?: number
+  error?: string
+  publicUrl?: string
 }
 
 type FeedbackSettings = {
@@ -242,8 +317,8 @@ const defaultData: DashboardData = {
     hasTikhubKey: false,
     hasLemonfoxKey: false,
     integrations: {
-      tikhub: { configured: false, masked: '' },
-      lemonfox: { configured: false, masked: '' },
+      tikhub: { configured: false },
+      lemonfox: { configured: false },
       transcription: {
         provider: 'faster-whisper',
         language: 'zh',
@@ -261,6 +336,29 @@ const defaultData: DashboardData = {
         localApiBase: 'http://127.0.0.1:8091',
         pythonBin: 'python3',
         monitorDir: '../douyin-monitor',
+      },
+      feishuBase: {
+        configured: false,
+        openApiConfigured: false,
+        syncMode: 'auto',
+        appIdConfigured: false,
+        appSecretConfigured: false,
+        appTokenConfigured: false,
+        tableIdConfigured: false,
+        baseUrl: '',
+        masked: {},
+        setupGuide: {
+          ready: false,
+          title: '还差 3 项即可稳定写入飞书',
+          missingKeys: ['appToken', 'tableId', 'openApi'],
+          steps: ['填写飞书 Base Token', '填写飞书 Table ID', '填写飞书应用 App ID 和 App Secret'],
+          reasons: ['用于定位团队协作的多维表格结果库。', '用于定位要写入的具体数据表。', '正式团队同步建议使用 OpenAPI，避免依赖个人 lark-cli 登录态。'],
+        },
+        fieldGuide: {
+          required: [{ name: '去重键', reason: '用于安全去重。' }],
+          groups: [],
+          copyText: '必需字段：去重键',
+        },
       },
       parserConfig: {
         configured: false,
@@ -286,6 +384,11 @@ const providerOptions = [
   { label: '本地 Whisper', value: 'whisper' },
   { label: 'Lemonfox 云端', value: 'lemonfox' },
 ]
+const feishuBaseSyncModeOptions = [
+  { label: '自动：优先 OpenAPI，缺凭证时用 lark-cli', value: 'auto' },
+  { label: 'OpenAPI：使用飞书应用凭证', value: 'openapi' },
+  { label: 'lark-cli：使用本机飞书授权', value: 'lark-cli' },
+]
 
 type PageId = 'overview' | 'lowfan' | 'accounts' | 'settings' | 'reports' | 'ops' | 'about' | 'feedback'
 
@@ -296,7 +399,7 @@ const navItems: Array<{ id: PageId; icon: IconComponent; label: string }> = [
   { id: 'lowfan', icon: Search, label: '低粉爆款' },
   { id: 'accounts', icon: LayoutList, label: '监控账号' },
   { id: 'settings', icon: Settings2, label: '接口配置' },
-  { id: 'reports', icon: FileText, label: '归档报告' },
+  { id: 'reports', icon: Database, label: '飞书结果库' },
   { id: 'ops', icon: ShieldCheck, label: '运行诊断' },
   { id: 'about', icon: Heart, label: '使用说明' },
   { id: 'feedback', icon: MessageSquareText, label: '反馈' },
@@ -327,9 +430,9 @@ const pageCopy: Record<PageId, { title: string; eyebrow: string; description: st
     description: '配置 TikHub、Lemonfox、抖音登录态和本地转写引擎，避免运行前再改环境变量。',
   },
   reports: {
-    title: '归档报告',
-    eyebrow: 'Archive',
-    description: '查看最近生成的 JSON、CSV 和 Markdown 报告，确认每次搜索和监控的产物位置。',
+    title: '飞书结果库',
+    eyebrow: 'Collaboration',
+    description: '低粉爆款和账号监控跑完后自动入库，团队在飞书里分配负责人、判断选题价值和沉淀复盘。',
   },
   ops: {
     title: '运行诊断',
@@ -518,6 +621,7 @@ function normalizeIntegrations(config: ConfigSummary): NonNullable<ConfigSummary
     },
     runtime: incoming?.runtime || fallback.runtime,
     parserConfig: incoming?.parserConfig || fallback.parserConfig,
+    feishuBase: incoming?.feishuBase || fallback.feishuBase,
   }
 }
 
@@ -550,6 +654,12 @@ function App() {
   const [localApiBase, setLocalApiBase] = useState('')
   const [pythonBin, setPythonBin] = useState('')
   const [monitorDir, setMonitorDir] = useState('')
+  const [feishuBaseAppId, setFeishuBaseAppId] = useState('')
+  const [feishuBaseAppSecret, setFeishuBaseAppSecret] = useState('')
+  const [feishuBaseAppToken, setFeishuBaseAppToken] = useState('')
+  const [feishuBaseTableId, setFeishuBaseTableId] = useState('')
+  const [feishuBaseSyncMode, setFeishuBaseSyncMode] = useState('auto')
+  const [feishuBaseCheck, setFeishuBaseCheck] = useState<FeishuBaseCheckResult | undefined>()
   const [transcriptionProvider, setTranscriptionProvider] = useState('faster-whisper')
   const [transcriptionLanguage, setTranscriptionLanguage] = useState('zh')
   const [localModel, setLocalModel] = useState('small')
@@ -631,6 +741,9 @@ function App() {
       setLocalApiBase(runtime.localApiBase || '')
       setPythonBin(runtime.pythonBin || '')
       setMonitorDir(runtime.monitorDir || '')
+    }
+    if (dashboard.config.integrations?.feishuBase) {
+      setFeishuBaseSyncMode(dashboard.config.integrations.feishuBase.syncMode || 'auto')
     }
   }
 
@@ -803,6 +916,81 @@ function App() {
     }
   }
 
+  async function saveFeishuBase() {
+    setRunning('feishuBase')
+    try {
+      const result = await api<{ ok: boolean; feishuBase: FeishuBaseState; error?: string }>('/api/settings/feishu-base', {
+        method: 'POST',
+        body: JSON.stringify({
+          syncMode: feishuBaseSyncMode,
+          appId: feishuBaseAppId,
+          appSecret: feishuBaseAppSecret,
+          appToken: feishuBaseAppToken,
+          tableId: feishuBaseTableId,
+        }),
+      })
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/settings/feishu-base',
+        code: result.ok ? 0 : 1,
+        stdout: result.ok ? '飞书结果库配置已保存' : '',
+        stderr: result.error || '',
+      })
+      setFeishuBaseAppId('')
+      setFeishuBaseAppSecret('')
+      setFeishuBaseAppToken('')
+      setFeishuBaseTableId('')
+      setFeishuBaseCheck(undefined)
+      setData((current) => ({
+        ...current,
+        config: {
+          ...current.config,
+          integrations: {
+            ...normalizeIntegrations(current.config),
+            feishuBase: result.feishuBase,
+          },
+        },
+      }))
+    } catch (error) {
+      setLastRun(createRunError('POST /api/settings/feishu-base', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  async function checkFeishuBase() {
+    setRunning('feishuBaseCheck')
+    try {
+      const result = await api<{ ok: boolean; check: FeishuBaseCheckResult; feishuBase?: FeishuBaseState; error?: string }>('/api/settings/feishu-base/check', {
+        method: 'POST',
+      })
+      setFeishuBaseCheck(result.check)
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/settings/feishu-base/check',
+        code: result.ok ? 0 : 1,
+        stdout: result.check?.title || '',
+        stderr: result.check?.error || result.error || '',
+      })
+      if (result.feishuBase) {
+        setData((current) => ({
+          ...current,
+          config: {
+            ...current.config,
+            integrations: {
+              ...normalizeIntegrations(current.config),
+              feishuBase: result.feishuBase,
+            },
+          },
+        }))
+      }
+    } catch (error) {
+      setLastRun(createRunError('POST /api/settings/feishu-base/check', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
   async function saveThresholds() {
     setRunning('thresholds')
     try {
@@ -952,6 +1140,7 @@ function App() {
           </div>
           <div className="brand-copy">
             <strong>素材雷达</strong>
+            <span>深圳艾造内部工具</span>
           </div>
         </div>
 
@@ -1069,6 +1258,7 @@ function App() {
             <section className="summary-grid">
               <FeatureTile icon={Search} title="低粉爆款" value={resultMode === 'lowfan' ? `${displayRows.length} 条命中` : '关键词发现'} onClick={() => navigate('lowfan')} />
               <FeatureTile icon={LayoutList} title="监控账号" value={`${data.config.enabledAccountCount} 个启用`} onClick={() => navigate('accounts')} />
+              <FeatureTile icon={Database} title="飞书结果库" value={lastRun?.baseSync?.synced ? `已同步 ${lastRun.baseSync.count || 0} 条` : integrations.feishuBase?.configured ? '已配置' : '待配置'} onClick={() => navigate('reports')} />
               <FeatureTile icon={Settings2} title="接口配置" value={data.config.hasTikhubKey && data.config.hasLemonfoxKey ? '关键接口已接入' : '有接口待配置'} onClick={() => navigate('settings')} />
             </section>
             <TimelineSection displayRows={displayRows} feedItems={feedItems} latestReport={latestReport} />
@@ -1180,11 +1370,28 @@ function App() {
               setMonitorDir={setMonitorDir}
               setPythonBin={setPythonBin}
             />
+            <FeishuBasePanel
+              appId={feishuBaseAppId}
+              appSecret={feishuBaseAppSecret}
+              appToken={feishuBaseAppToken}
+              checkFeishuBase={checkFeishuBase}
+              checkResult={feishuBaseCheck}
+              feishuBase={integrations.feishuBase}
+              running={running}
+              saveFeishuBase={saveFeishuBase}
+              setAppId={setFeishuBaseAppId}
+              setAppSecret={setFeishuBaseAppSecret}
+              setAppToken={setFeishuBaseAppToken}
+              setSyncMode={setFeishuBaseSyncMode}
+              setTableId={setFeishuBaseTableId}
+              syncMode={feishuBaseSyncMode}
+              tableId={feishuBaseTableId}
+            />
             <SessionPanel parserConfig={integrations.parserConfig} running={running} saveSession={saveSession} sessionid={sessionid} setSessionid={setSessionid} />
           </section>
         )}
 
-        {activePage === 'reports' && <ReportsPage outputDir={data.config.outputDir} reports={data.reports} />}
+        {activePage === 'reports' && <ReportsPage baseSync={lastRun?.baseSync} feishuBase={integrations.feishuBase} outputDir={data.config.outputDir} reports={data.reports} />}
         {activePage === 'ops' && <OpsPage data={data} lastErrors={lastErrors} lastRun={lastRun} parsedRun={parsedRun} providerStatus={providerStatus} />}
         {activePage === 'about' && <AboutPage />}
         {activePage === 'feedback' && <FeedbackPage settings={data.feedback || feedbackDefaults} />}
@@ -1712,10 +1919,10 @@ function IntegrationPanel({
         <p className="panel-copy">低粉搜索需要 TikHub；转写默认走本地 faster-whisper，Lemonfox 仅作为云端省心选项。</p>
         <div className="form-grid">
           <Field label="TikHub Key" help="用于低粉爆款搜索。官网有试用额度，正式使用通常按请求或套餐收费。">
-            <Input value={tikhubKey} onChange={(event) => setTikhubKey(event.target.value)} placeholder={integrations.tikhub.configured ? integrations.tikhub.masked : 'Bearer ...'} type="password" />
+            <Input value={tikhubKey} onChange={(event) => setTikhubKey(event.target.value)} placeholder={integrations.tikhub.configured ? '已配置，留空则不修改' : '仅在本机保存'} type="password" />
           </Field>
           <Field label="Lemonfox Key" help="用于云端语音转文字。官网展示试用和按月/积分计费，批量转写前要看额度。">
-            <Input value={lemonfoxKey} onChange={(event) => setLemonfoxKey(event.target.value)} placeholder={integrations.lemonfox.configured ? integrations.lemonfox.masked : 'sk-...'} type="password" />
+            <Input value={lemonfoxKey} onChange={(event) => setLemonfoxKey(event.target.value)} placeholder={integrations.lemonfox.configured ? '已配置，留空则不修改' : '仅在本机保存'} type="password" />
           </Field>
           <Field label="转写引擎">
             <Select value={transcriptionProvider} onChange={setTranscriptionProvider} options={providerOptions} />
@@ -1806,6 +2013,150 @@ function RuntimePanel({
           {running === 'runtime' ? <Loader2 className="size-4 animate-spin" /> : <Server className="size-4" />}
           保存后台配置
         </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function FeishuBasePanel({
+  appId,
+  appSecret,
+  appToken,
+  checkFeishuBase,
+  checkResult,
+  feishuBase,
+  running,
+  saveFeishuBase,
+  setAppId,
+  setAppSecret,
+  setAppToken,
+  setSyncMode,
+  setTableId,
+  syncMode,
+  tableId,
+}: {
+  appId: string
+  appSecret: string
+  appToken: string
+  checkFeishuBase: () => void
+  checkResult?: FeishuBaseCheckResult
+  feishuBase?: FeishuBaseState
+  running: RunningAction
+  saveFeishuBase: () => void
+  setAppId: (value: string) => void
+  setAppSecret: (value: string) => void
+  setAppToken: (value: string) => void
+  setSyncMode: (value: string) => void
+  setTableId: (value: string) => void
+  syncMode: string
+  tableId: string
+}) {
+  const configured = Boolean(feishuBase?.configured)
+  const missing = [
+    feishuBase?.appTokenConfigured ? '' : 'Base Token',
+    feishuBase?.tableIdConfigured ? '' : 'Table ID',
+    syncMode === 'openapi' && !feishuBase?.openApiConfigured ? 'App ID / Secret' : '',
+  ].filter(Boolean)
+  const setupGuide = feishuBase?.setupGuide
+  const fieldGuide = feishuBase?.fieldGuide
+
+  return (
+    <Card className="control-card settings-card">
+      <CardContent>
+        <PanelTitle icon={Database} title="飞书结果库" />
+        <p className="panel-copy">用于把低粉爆款和账号监控结果写入飞书 Base。这里保存到 Mac mini 本机环境变量；留空的密钥不会覆盖已有配置。</p>
+        <div className="base-status-row">
+          <StatusPill icon={Database} label="Base" value={configured ? '已配置' : '未配置'} tone={configured ? 'good' : 'warn'} />
+          <StatusPill icon={ShieldCheck} label="缺少" value={missing.length ? missing.join(' / ') : '无'} tone={missing.length ? 'warn' : 'good'} />
+        </div>
+        {feishuBase?.baseUrl && (
+          <div className="feedback-actions">
+            <a className="feedback-link feedback-link-primary" href={feishuBase.baseUrl} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+              打开飞书结果库
+            </a>
+          </div>
+        )}
+        {setupGuide && (
+          <div className={`setup-guide ${setupGuide.ready ? 'is-ready' : ''}`}>
+            <div className="setup-guide-head">
+              {setupGuide.ready ? <CheckCircle2 className="size-4" /> : <AlertTriangle className="size-4" />}
+              <strong>{setupGuide.title}</strong>
+            </div>
+            {!setupGuide.ready && (
+              <ol>
+                {setupGuide.steps.map((step, index) => (
+                  <li key={step}>
+                    <span>{step}</span>
+                    <em>{setupGuide.reasons[index]}</em>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+        {fieldGuide && (
+          <div className="field-guide">
+            <div className="field-guide-head">
+              <strong>飞书建表字段</strong>
+              <span>先建必需字段，再按需补推荐字段</span>
+            </div>
+            <div className="field-guide-required">
+              <span>必需</span>
+              {fieldGuide.required.map((field) => (
+                <strong key={field.name}>{field.name}</strong>
+              ))}
+            </div>
+            <div className="field-guide-groups">
+              {fieldGuide.groups.map((group) => (
+                <div className="field-guide-group" key={group.label}>
+                  <span>{group.label}</span>
+                  <p>{group.fields.map((field) => field.name).join('、')}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {checkResult && (
+          <div className={`field-check-result ${checkResult.ready ? 'is-ready' : 'is-blocked'}`}>
+            <div className="field-check-head">
+              {checkResult.ready ? <CheckCircle2 className="size-4" /> : <AlertTriangle className="size-4" />}
+              <strong>{checkResult.title}</strong>
+            </div>
+            {checkResult.error && <p>{checkResult.error}</p>}
+            {checkResult.missingConfig.length > 0 && <p>缺少配置：{checkResult.missingConfig.join('、')}</p>}
+            {checkResult.missingRequired.length > 0 && <p>缺少必需字段：{checkResult.missingRequired.join('、')}</p>}
+            {checkResult.missingRecommended.length > 0 && <p>建议补充字段：{checkResult.missingRecommended.slice(0, 10).join('、')}{checkResult.missingRecommended.length > 10 ? '等' : ''}</p>}
+            {checkResult.checkedFields.length > 0 && <span>已检查 {checkResult.checkedFields.length} 个字段</span>}
+          </div>
+        )}
+        <div className="form-grid">
+          <Field label="同步方式" help="推荐自动模式。OpenAPI 更稳定；lark-cli 适合本机已有飞书授权的临时兜底。">
+            <Select value={syncMode} onChange={setSyncMode} options={feishuBaseSyncModeOptions} />
+          </Field>
+          <Field label="Base Token" help="飞书多维表格链接里的 bascn...；这是结果库地址，不是应用密钥。">
+            <Input value={appToken} onChange={(event) => setAppToken(event.target.value)} placeholder={feishuBase?.appTokenConfigured ? `${feishuBase.masked?.appToken || '已配置'}，留空不修改` : 'bascn...'} type="password" />
+          </Field>
+          <Field label="Table ID" help="飞书表格的数据表 ID，通常是 tbl...。">
+            <Input value={tableId} onChange={(event) => setTableId(event.target.value)} placeholder={feishuBase?.tableIdConfigured ? `${feishuBase.masked?.tableId || '已配置'}，留空不修改` : 'tbl...'} type="password" />
+          </Field>
+          <Field label="App ID" help="OpenAPI 模式需要；自动模式下填了会优先使用 OpenAPI。">
+            <Input value={appId} onChange={(event) => setAppId(event.target.value)} placeholder={feishuBase?.appIdConfigured ? `${feishuBase.masked?.appId || '已配置'}，留空不修改` : 'cli_...'} type="password" />
+          </Field>
+          <Field label="App Secret" help="只保存在本机 .env.local，不会显示在页面、报告或飞书卡片里。">
+            <Input value={appSecret} onChange={(event) => setAppSecret(event.target.value)} placeholder={feishuBase?.appSecretConfigured ? '已配置，留空不修改' : '仅在本机保存'} type="password" />
+          </Field>
+        </div>
+        <div className="field-guide-actions">
+          <Button variant="ghost" onClick={checkFeishuBase} disabled={running !== null}>
+            {running === 'feishuBaseCheck' ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+            检查飞书表
+          </Button>
+          <Button variant="secondary" onClick={saveFeishuBase} disabled={running !== null}>
+            {running === 'feishuBase' ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+            保存配置
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )
@@ -1935,6 +2286,10 @@ function UtilityGrid({
 }
 
 function RunLogCard({ lastRun, parsedRun }: { lastRun?: RunResult; parsedRun: Record<string, unknown> | null }) {
+  const syncItems = [
+    lastRun?.baseSync ? { label: '飞书结果库', result: lastRun.baseSync } : null,
+    lastRun?.contentOsSync ? { label: 'Content OS', result: lastRun.contentOsSync } : null,
+  ].filter(Boolean) as Array<{ label: string; result: SyncResult }>
   return (
     <Card className="terminal-card">
       <CardContent>
@@ -1942,6 +2297,15 @@ function RunLogCard({ lastRun, parsedRun }: { lastRun?: RunResult; parsedRun: Re
           <Clock3 className="size-4" />
           最近运行
         </div>
+        {syncItems.length > 0 && (
+          <div className="tag-row">
+            {syncItems.map((item) => (
+              <span key={item.label}>
+                {item.label} {item.result.synced ? `已同步 ${item.result.count || 0}` : item.result.configured ? '同步失败' : '未配置'}
+              </span>
+            ))}
+          </div>
+        )}
         <pre>{parsedRun ? JSON.stringify(parsedRun, null, 2) : lastRun?.stderr || lastRun?.stdout || '等待下一次运行。'}</pre>
       </CardContent>
     </Card>
@@ -2001,16 +2365,62 @@ function AlertsCard({ lastErrors }: { lastErrors: unknown[] }) {
   )
 }
 
-function ReportsPage({ outputDir, reports }: { outputDir: string; reports: ReportFile[] }) {
+function ReportsPage({
+  baseSync,
+  feishuBase,
+  outputDir,
+  reports,
+}: {
+  baseSync?: SyncResult
+  feishuBase?: FeishuBaseState
+  outputDir: string
+  reports: ReportFile[]
+}) {
   const jsonCount = reports.filter((report) => report.type === 'json').length
   const mdCount = reports.filter((report) => report.type === 'md').length
+  const baseConfigured = Boolean(feishuBase?.configured)
+  const syncLabel = baseSync
+    ? baseSync.synced
+      ? `上次同步 ${baseSync.count || 0} 条，新建 ${baseSync.created || 0} / 更新 ${baseSync.updated || 0}`
+      : baseSync.configured
+        ? `上次同步失败：${baseSync.error || '请检查飞书 Base 字段'}`
+        : '飞书 Base 未配置'
+    : baseConfigured
+      ? '已配置，下一次运行会自动同步'
+      : '未配置'
 
   return (
     <section className="reports-page">
+      <Card className="base-guide-card">
+        <CardContent>
+          <div className="base-guide-head">
+            <PanelTitle icon={Database} title="飞书协作结果库" />
+            {feishuBase?.baseUrl ? (
+              <a className="feedback-link feedback-link-primary" href={feishuBase.baseUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="size-4" />
+                打开飞书结果库
+              </a>
+            ) : (
+              <Badge variant="warning">待配置</Badge>
+            )}
+          </div>
+          <p className="panel-copy">低粉爆款搜索和监控账号产物会按“去重键”入库；系统只更新素材字段，不覆盖团队在飞书里填写的负责人、处理状态、选题价值和复盘内容。</p>
+          <div className="base-status-row">
+            <StatusPill icon={Database} label="Base" value={baseConfigured ? '已配置' : '未配置'} tone={baseConfigured ? 'good' : 'warn'} />
+            <StatusPill icon={RefreshCw} label="同步" value={syncLabel} tone={baseSync?.synced ? 'good' : baseConfigured ? 'default' : 'warn'} />
+          </div>
+          <div className="workflow-lane">
+            <span>1. 跑低粉爆款 / 账号监控</span>
+            <span>2. 自动去重入飞书</span>
+            <span>3. 飞书分负责人和状态</span>
+            <span>4. 入选素材进入创作排期</span>
+          </div>
+        </CardContent>
+      </Card>
       <Card className="history-guide-card">
         <CardContent>
-          <PanelTitle icon={History} title="历史记录怎么保存" />
-          <p>每次低粉爆款搜索和对标账号监控都会写入本地归档目录，服务重启后仍从这里读取历史记录。运营同事直接看本页；需要给别人分析时，优先下载 Markdown 或 CSV。</p>
+          <PanelTitle icon={History} title="本机归档" />
+          <p>每次低粉爆款搜索和对标账号监控都会写入 Mac mini 本地归档目录，服务重启后仍从这里读取历史记录。需要离线分析时，优先下载 Markdown 或 CSV。</p>
           <div className="history-meta">
             <span>本地目录：{outputDir || '等待读取'}/runs</span>
             <span>JSON {jsonCount} 份</span>
@@ -2287,6 +2697,7 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
   const transcriptDownloadUrl = assetDownloadUrl(item.transcript_path)
   const srtUrl = assetViewUrl(item.srt_path)
   const isBenchmark = Boolean(item.source_account)
+  const ipOperation = item.ip_operation
 
   return (
     <article className="timeline-row">
@@ -2329,6 +2740,20 @@ function TimelineItem({ item, index, empty }: { item: ReportRow; index: number; 
               ? '先运行一次搜索或账号监控，命中的素材会按时间线展示在这里。'
               : item.hit_reason || (isBenchmark ? `对标账号最新作品，可优先记录选题角度、标题结构和口播节奏。素材序号 ${index + 1}。` : `互动数据超过监控阈值，适合做低粉爆款拆解。素材序号 ${index + 1}。`)}
           </div>
+          {!empty && ipOperation && (
+            <div className="ip-operation-box">
+              <div className="ip-operation-head">
+                <Badge>{ipOperation.sourceLabel}</Badge>
+                <span>{ipOperation.contentForm}</span>
+              </div>
+              <strong>{ipOperation.topicLine}</strong>
+              <p>{ipOperation.operatingView}</p>
+              <div className="ip-operation-next">
+                <span>下一步</span>
+                <em>{ipOperation.nextAction}</em>
+              </div>
+            </div>
+          )}
 
           <div className="card-actions">
             {item.url && (

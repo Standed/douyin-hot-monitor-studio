@@ -6,6 +6,8 @@ import { constants as fsConstants } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildFeishuBaseCheckResult, feishuBaseStatusFromEnv, maskSecret, normalizeFeishuBaseConfigInput } from './server/feishu-base-config.mjs'
+import { buildIpOperationCard } from './server/ip-opportunity.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const defaultMonitorDir = path.resolve(__dirname, '../douyin-monitor')
@@ -35,7 +37,22 @@ const defaultLowFanConfig = {
 }
 
 const defaultCardMaxRows = 8
-const collaborationFields = new Set(['处理状态', '负责人', '选题价值', '是否已采纳', '备注'])
+const collaborationFields = new Set([
+  '处理状态',
+  '负责人',
+  '适配账号',
+  '选题价值',
+  '内容类型',
+  '是否已采纳',
+  '选题句',
+  '写作角度',
+  '素材缺口',
+  '备注',
+  '成稿链接',
+  '发布链接',
+  '复盘结论',
+])
+const extendedFeishuFields = new Set(['适配账号', '内容类型', '选题句', '写作角度', '素材缺口', '成稿链接', '发布链接', '复盘结论', 'IP操盘判断', '内容形式', '选题来源', '下一步动作'])
 const dailyRunState = {
   running: false,
   lastDateKey: '',
@@ -171,19 +188,32 @@ async function latestRows(reports) {
   const latestJson = reports.find((report) => report.type === 'json')
   if (!latestJson) return []
   const rows = await readJson(latestJson.path, [])
-  return Array.isArray(rows) ? rows : []
+  return Array.isArray(rows) ? enrichReportRows(rows, kindFromReportName(latestJson.name)) : []
 }
 
 async function latestRowsByKind(reports, kind) {
   const latestJson = reports.find((report) => report.type === 'json' && report.name.includes(`_${kind}`))
   if (!latestJson) return []
   const rows = await readJson(latestJson.path, [])
-  return Array.isArray(rows) ? rows : []
+  return Array.isArray(rows) ? enrichReportRows(rows, kindFromReportName(latestJson.name, kind)) : []
 }
 
 async function reportRows(reportPath) {
   const rows = await readJson(reportPath, [])
-  return Array.isArray(rows) ? rows : []
+  return Array.isArray(rows) ? enrichReportRows(rows, kindFromReportName(path.basename(reportPath))) : []
+}
+
+function kindFromReportName(name = '', fallback = '') {
+  if (String(name).includes('account_new')) return 'account'
+  if (String(name).includes('lowfan')) return 'lowfan'
+  return fallback || ''
+}
+
+function enrichReportRows(rows = [], kind = '') {
+  return rows.map((row, index) => ({
+    ...row,
+    ip_operation: buildIpOperationCard(kind || (row.source_account ? 'account' : 'lowfan'), row, index),
+  }))
 }
 
 function summarizeAccounts(config) {
@@ -351,13 +381,6 @@ function parseMonitorOutput(stdout) {
   }
 }
 
-function maskSecret(value) {
-  if (!value) return ''
-  const normalized = String(value).trim()
-  if (normalized.length <= 10) return '已配置'
-  return `${normalized.slice(0, 6)}...${normalized.slice(-4)}`
-}
-
 async function readLocalEnvValues() {
   const envPath = path.join(__dirname, '.env.local')
   const values = {}
@@ -473,6 +496,302 @@ function feishuBaseSettings(envValues = {}) {
   }
 }
 
+function feishuBaseStatus(envValues = {}) {
+  return feishuBaseStatusFromEnv({
+    ...envValues,
+    FEISHU_BASE_SYNC_MODE: process.env.FEISHU_BASE_SYNC_MODE || envValues.FEISHU_BASE_SYNC_MODE,
+    FEISHU_BASE_APP_ID: process.env.FEISHU_BASE_APP_ID || envValues.FEISHU_BASE_APP_ID,
+    FEISHU_BASE_APP_SECRET: process.env.FEISHU_BASE_APP_SECRET || envValues.FEISHU_BASE_APP_SECRET,
+    FEISHU_BASE_APP_TOKEN: process.env.FEISHU_BASE_APP_TOKEN || envValues.FEISHU_BASE_APP_TOKEN || process.env.FEISHU_BASE_TOKEN || envValues.FEISHU_BASE_TOKEN,
+    FEISHU_BASE_TABLE_ID: process.env.FEISHU_BASE_TABLE_ID || envValues.FEISHU_BASE_TABLE_ID,
+    LARK_APP_ID: process.env.LARK_APP_ID || envValues.LARK_APP_ID,
+    LARK_APP_SECRET: process.env.LARK_APP_SECRET || envValues.LARK_APP_SECRET,
+  })
+}
+
+function contentOsSettings(envValues = {}) {
+  const url = process.env.CONTENT_OS_SUPABASE_URL || envValues.CONTENT_OS_SUPABASE_URL || process.env.SUPABASE_URL || envValues.SUPABASE_URL || ''
+  const serviceRoleKey =
+    process.env.CONTENT_OS_SUPABASE_SERVICE_ROLE_KEY ||
+    envValues.CONTENT_OS_SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    envValues.SUPABASE_SERVICE_ROLE_KEY ||
+    ''
+  const workspaceId = process.env.CONTENT_OS_WORKSPACE_ID || envValues.CONTENT_OS_WORKSPACE_ID || '00000000-0000-4000-8000-000000000001'
+  const sourceName = process.env.CONTENT_OS_DOUYIN_SOURCE_NAME || envValues.CONTENT_OS_DOUYIN_SOURCE_NAME || '抖音素材雷达'
+  const publicUrl = process.env.CONTENT_OS_PUBLIC_URL || envValues.CONTENT_OS_PUBLIC_URL || 'https://content.aizao.ai'
+  const enabled = booleanEnv(process.env.CONTENT_OS_SYNC_ENABLED || envValues.CONTENT_OS_SYNC_ENABLED, false)
+  return {
+    configured: Boolean(enabled && url && serviceRoleKey && workspaceId),
+    enabled,
+    url: url.replace(/\/$/, ''),
+    serviceRoleKey,
+    workspaceId,
+    sourceName,
+    publicUrl,
+  }
+}
+
+async function contentOsFetch(settings, pathName, options = {}) {
+  const response = await fetch(`${settings.url}/rest/v1/${pathName}`, {
+    method: options.method || 'GET',
+    headers: {
+      apikey: settings.serviceRoleKey,
+      Authorization: `Bearer ${settings.serviceRoleKey}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      Prefer: options.prefer || 'return=representation',
+      ...options.headers,
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  })
+  const text = await response.text()
+  const payload = text ? JSON.parse(text) : null
+  if (!response.ok) {
+    throw new Error(`Content OS Supabase ${response.status}: ${text.slice(0, 240)}`)
+  }
+  return payload
+}
+
+function contentOsFilter(value) {
+  return encodeURIComponent(String(value || ''))
+}
+
+async function ensureContentOsSource(settings) {
+  const existing = await contentOsFetch(
+    settings,
+    `sources?workspace_id=eq.${contentOsFilter(settings.workspaceId)}&name=eq.${contentOsFilter(settings.sourceName)}&limit=1`,
+  )
+  if (existing?.[0]?.id) return existing[0]
+  const created = await contentOsFetch(settings, 'sources', {
+    method: 'POST',
+    body: {
+      workspace_id: settings.workspaceId,
+      name: settings.sourceName,
+      tier: 'T1_5',
+      method: 'api',
+      connector_kind: 'private_worker',
+      connector_config: { producer: 'douyin.aizao.ai', boundary: 'data-sync-only' },
+      url: 'https://douyin.aizao.ai/',
+      cadence: 'manual_or_daily',
+      status: 'active',
+      owner: '素材雷达',
+      account_fit: ['main', 'yangy', 'dramas', 'gongfang'],
+      use_case: '把低粉爆款和对标账号监控结果作为 Content OS 的内容机会，不合并抖音配置界面。',
+      risk: '抖音 Cookie、解析 API、转写模型仍留在素材雷达后台，Content OS 只消费结果。',
+    },
+  })
+  return created?.[0]
+}
+
+function contentOsTimestamp(value) {
+  const date = value ? new Date(value) : new Date()
+  return Number.isNaN(+date) ? new Date().toISOString() : date.toISOString()
+}
+
+function contentOsFitAccounts(row = {}) {
+  const text = [row.keyword, row.title, row.hit_reason, row.source_account].join(' ')
+  if (/短剧|剧本|剪辑|视频号/.test(text)) return ['dramas']
+  if (/agent|智能体|自动化|编程|cursor|codex/i.test(text)) return ['gongfang', 'main']
+  return ['main']
+}
+
+function fitAccountLabels(row = {}) {
+  const fits = contentOsFitAccounts(row)
+  const labels = {
+    main: '西羊石AI视频',
+    yangy: '羊羊AI视频',
+    dramas: '西羊石AI短剧',
+    gongfang: '小石的AI智能体工坊',
+  }
+  return fits.map((fit) => labels[fit] || fit).join('、')
+}
+
+function contentOsAssetList(row = {}, reports = {}, envValues = {}) {
+  return [
+    row.url ? { label: '原视频', url: row.url, kind: '原视频' } : null,
+    row.local_video_path ? { label: '无水印视频', url: assetLink(row.local_video_path, envValues) || row.local_video_path, kind: '无水印视频' } : null,
+    row.transcript_path ? { label: '口播文稿', url: assetLink(row.transcript_path, envValues, { inline: true }) || row.transcript_path, kind: '口播文稿' } : null,
+    row.srt_path ? { label: 'SRT字幕', url: assetLink(row.srt_path, envValues, { inline: true }) || row.srt_path, kind: '字幕' } : null,
+    reports.md ? { label: 'Markdown报告', url: reportLink(reports.md, envValues) || reportFileName(reports.md), kind: '报告' } : null,
+    reports.csv ? { label: 'CSV报告', url: reportLink(reports.csv, envValues) || reportFileName(reports.csv), kind: '报告' } : null,
+  ].filter(Boolean)
+}
+
+function contentOsOpportunity(kind, result, row, index, envValues = {}) {
+  const reports = result.parsed?.reports || {}
+  const materialKind = kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控'
+  const score = Number(row.viral_score || 0)
+  const finalScore = score > 0 ? Math.min(99, Math.max(55, Math.round(score))) : Math.min(92, Math.max(58, Math.round(((row.like_count || 0) + (row.collect_count || 0) + (row.comment_count || 0) + (row.share_count || 0)) / 35)))
+  const evidence = [row.hit_reason, rowMetricLine(row), row.source_api ? `来源API：${sourceApiLabel(row.source_api)}` : ''].filter(Boolean)
+  return {
+    opportunity: {
+      id: dedupeKeyForRow(kind, row),
+      sourcePlatform: 'douyin',
+      sourceKind: materialKind,
+      title: truncateText(row.title || '未命名作品', 500),
+      summary: materialSummary(row),
+      originalUrl: row.url || '',
+      author: row.author || '',
+      sourceAccount: row.source_account || '',
+      keyword: row.keyword || '',
+      publishedAt: contentOsTimestamp(row.create_time),
+      metrics: [
+        { label: '爆款分', value: finalScore },
+        { label: '粉丝', value: Number(row.follower_count || 0) },
+        { label: '点赞', value: Number(row.like_count || 0) },
+        { label: '评论', value: Number(row.comment_count || 0) },
+        { label: '收藏', value: Number(row.collect_count || 0) },
+        { label: '转发', value: Number(row.share_count || 0) },
+      ],
+      evidence,
+      painPoints: [],
+      fitAccounts: contentOsFitAccounts(row),
+      angles: [
+        operationSuggestion(row, kind, index),
+        row.hit_reason || '从标题、封面、口播和评论反馈里拆一个可复用选题。',
+      ],
+      assets: contentOsAssetList(row, reports, envValues),
+      risk: '只作为内容机会进入 Content OS，是否采用、观点和写作判断必须人工确认。',
+      status: '已精选',
+      workflowStage: 'topic_candidate',
+    },
+    finalScore,
+  }
+}
+
+async function upsertContentOsRows(settings, source, kind, result, envValues = {}) {
+  const rows = Array.isArray(result.rows) ? result.rows.slice(0, 200) : []
+  if (!rows.length) return { rawItems: 0, signals: 0 }
+  const rawPayload = rows.map((row, index) => {
+    const { opportunity } = contentOsOpportunity(kind, result, row, index, envValues)
+    return {
+      workspace_id: settings.workspaceId,
+      source_id: source.id,
+      external_id: dedupeKeyForRow(kind, row),
+      title: opportunity.title,
+      url: opportunity.originalUrl || row.url || '',
+      raw: {
+        provider: 'douyin-hot-monitor-studio',
+        material_kind: kind,
+        row,
+        content_opportunity: opportunity,
+      },
+      fetched_at: new Date().toISOString(),
+    }
+  })
+  const rawItems = await contentOsFetch(settings, 'raw_items?on_conflict=source_id,external_id', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: rawPayload,
+  })
+  const signalPayload = rawItems.map((rawItem, index) => {
+    const row = rows[index] || {}
+    const { opportunity, finalScore } = contentOsOpportunity(kind, result, row, index, envValues)
+    return {
+      workspace_id: settings.workspaceId,
+      source_id: source.id,
+      raw_item_id: rawItem.id,
+      title: opportunity.title,
+      summary: opportunity.summary,
+      url: opportunity.originalUrl || row.url || '',
+      published_at: opportunity.publishedAt,
+      category: 'benchmark',
+      tags: ['抖音', '素材雷达', opportunity.sourceKind, row.keyword || row.source_account || row.author || ''].filter(Boolean),
+      relevance_score: finalScore,
+      novelty_score: Math.min(98, Math.max(50, finalScore - 3)),
+      authority_score: Math.min(95, Math.max(45, Number(row.follower_count || 0) > 50000 ? 72 : 58)),
+      actionability_score: Math.min(99, Math.max(55, finalScore + (row.transcript_path ? 4 : 0))),
+      conversion_score: Math.min(95, Math.max(50, finalScore - 5)),
+      final_score: finalScore,
+      selection_threshold: 70,
+      status: 'selected',
+      reason: opportunity.angles[0] || operationSuggestion(row, kind, index),
+      updated_at: new Date().toISOString(),
+    }
+  })
+  const signals = await contentOsFetch(settings, 'signals?on_conflict=raw_item_id', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: signalPayload,
+  })
+  return { rawItems: rawItems.length, signals: signals.length }
+}
+
+async function updateContentOsRun(settings, source, kind, result, counts, error = '') {
+  await contentOsFetch(settings, 'source_jobs?on_conflict=source_id', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates,return=representation',
+    body: {
+      source_id: source.id,
+      mode: 'private_worker',
+      enabled: true,
+      last_status: error ? 'failed' : 'success',
+      last_error: error,
+      last_run_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+  })
+  await contentOsFetch(settings, 'monitor_runs', {
+    method: 'POST',
+    body: {
+      workspace_id: settings.workspaceId,
+      source_id: source.id,
+      connector_kind: 'private_worker',
+      runner: 'douyin-hot-monitor-studio',
+      status: error ? 'failed' : 'success',
+      item_count: Array.isArray(result.rows) ? result.rows.length : 0,
+      signal_count: counts.signals || 0,
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      error,
+      meta: {
+        kind,
+        command: result.command,
+        reports: result.parsed?.reports || {},
+      },
+    },
+  })
+}
+
+async function syncRunToContentOs(kind, result, envValues = {}) {
+  const settings = contentOsSettings(envValues)
+  const rows = Array.isArray(result.rows) ? result.rows : []
+  if (!settings.configured) {
+    return { configured: false, synced: false, count: 0, enabled: settings.enabled }
+  }
+  try {
+    const source = await ensureContentOsSource(settings)
+    if (!source?.id) throw new Error('Content OS source 创建失败')
+    const counts = await upsertContentOsRows(settings, source, kind, result, envValues)
+    await updateContentOsRun(settings, source, kind, result, counts)
+    return {
+      configured: true,
+      synced: true,
+      count: counts.signals,
+      rawItems: counts.rawItems,
+      signals: counts.signals,
+      sourceId: source.id,
+      publicUrl: settings.publicUrl,
+      rows: rows.length,
+    }
+  } catch (error) {
+    try {
+      const source = await ensureContentOsSource(settings)
+      if (source?.id) await updateContentOsRun(settings, source, kind, result, { signals: 0 }, error instanceof Error ? error.message : String(error))
+    } catch {
+      // Keep the original run usable even if run-status writeback also fails.
+    }
+    return {
+      configured: true,
+      synced: false,
+      count: 0,
+      error: error instanceof Error ? error.message : String(error),
+      publicUrl: settings.publicUrl,
+    }
+  }
+}
+
 function safeIsoDateTime(value = new Date()) {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(+date)) return new Date().toISOString()
@@ -535,13 +854,16 @@ function materialSummary(row) {
   return truncateText(`${author} ｜ ${rowMetricLine(row)} ｜ ${reason}`, 700)
 }
 
+function contentTypeFromRow(row = {}, kind = '') {
+  return buildIpOperationCard(kind, row).contentForm
+}
+
+function topicSeed(row = {}, kind = '') {
+  return buildIpOperationCard(kind, row).topicLine
+}
+
 function operationSuggestion(row, kind, index) {
-  if (kind === 'account') {
-    const rank = Number(index) + 1
-    return `来自监控账号池第 ${rank} 条新素材。建议先判断选题角度、标题结构、口播节奏和评论区反馈；需要创作复用时再下载无水印视频或提取文稿。`
-  }
-  const keyword = row.keyword ? `关键词“${row.keyword}”` : '本次关键词'
-  return `来自${keyword}低粉爆款搜索。建议优先看标题钩子、封面承诺、互动异常点和转发理由；适合沉淀到选题池后再安排改写或视频创作。`
+  return buildIpOperationCard(kind, row, index).nextAction
 }
 
 async function feishuTenantAccessToken(settings) {
@@ -565,6 +887,7 @@ async function feishuRecordFields(kind, result, row, index, envValues = {}, opti
   const runId = reportRunId(reports)
   const materialKind = kind === 'lowfan' ? '低粉爆款搜索' : '对标账号监控'
   const transcriptText = await readTextPreview(row.transcript_path, 3500)
+  const ipCard = buildIpOperationCard(kind, row, index)
   const fields = {
     去重键: dedupeKeyForRow(kind, row),
     运行ID: runId,
@@ -575,6 +898,18 @@ async function feishuRecordFields(kind, result, row, index, envValues = {}, opti
     素材摘要: materialSummary(row),
     口播正文: transcriptText,
     运营建议: operationSuggestion(row, kind, index),
+    适配账号: fitAccountLabels(row),
+    内容类型: ipCard.contentForm,
+    内容形式: ipCard.contentForm,
+    选题来源: ipCard.sourceLabel,
+    选题句: ipCard.topicLine,
+    写作角度: ipCard.nextAction,
+    IP操盘判断: truncateText(`${ipCard.operatingView}${ipCard.evidenceLine ? ` 证据：${ipCard.evidenceLine}` : ''}`, 700),
+    下一步动作: ipCard.nextAction,
+    素材缺口: ipCard.materialGap,
+    成稿链接: '',
+    发布链接: '',
+    复盘结论: '',
     作者: row.author || '',
     来源账号: row.source_account || '',
     关键词: row.keyword || '',
@@ -608,6 +943,10 @@ async function feishuRecordFields(kind, result, row, index, envValues = {}, opti
 
 function fieldsWithoutCollaboration(fields) {
   return Object.fromEntries(Object.entries(fields).filter(([field]) => !collaborationFields.has(field)))
+}
+
+function fieldsWithoutExtendedFeishu(fields) {
+  return Object.fromEntries(Object.entries(fields).filter(([field]) => !extendedFeishuFields.has(field)))
 }
 
 function parseJsonFromCliOutput(output) {
@@ -699,6 +1038,17 @@ async function feishuApi(settings, token, pathName, options = {}) {
   return payload
 }
 
+async function openApiTableFieldNames(settings, token) {
+  const payload = await feishuApi(settings, token, `/bitable/v1/apps/${settings.baseToken}/tables/${settings.tableId}/fields?page_size=200`)
+  const items = payload?.data?.items || []
+  return new Set(items.map((item) => item?.field_name).filter(Boolean))
+}
+
+function filterFieldsByNames(fields, fieldNames) {
+  if (!fieldNames?.size) return fields
+  return Object.fromEntries(Object.entries(fields).filter(([field]) => fieldNames.has(field)))
+}
+
 async function openApiFindRecord(settings, token, dedupeKey) {
   const payload = await feishuApi(
     settings,
@@ -755,11 +1105,18 @@ async function syncRunToFeishuBase(kind, result, envValues = {}) {
   try {
     const useOpenApi = settings.syncMode === 'openapi' || (settings.syncMode === 'auto' && settings.openApiConfigured)
     const token = useOpenApi ? await feishuTenantAccessToken(settings) : ''
+    const tableFieldNames = useOpenApi ? await openApiTableFieldNames(settings, token) : null
+    if (tableFieldNames && !tableFieldNames.has('去重键')) {
+      throw new Error('飞书 Base 缺少必需字段“去重键”，无法安全去重入库。')
+    }
     let created = 0
     let updated = 0
     for (const [index, row] of rows.slice(0, 200).entries()) {
-      const createFields = await feishuRecordFields(kind, result, row, index, envValues, { includeCollaborationDefaults: true })
-      const updateFields = fieldsWithoutCollaboration(createFields)
+      const rawCreateFields = await feishuRecordFields(kind, result, row, index, envValues, { includeCollaborationDefaults: true })
+      const syncCreateFields = useOpenApi ? rawCreateFields : fieldsWithoutExtendedFeishu(rawCreateFields)
+      const syncUpdateFields = useOpenApi ? fieldsWithoutCollaboration(rawCreateFields) : fieldsWithoutCollaboration(fieldsWithoutExtendedFeishu(rawCreateFields))
+      const createFields = filterFieldsByNames(syncCreateFields, tableFieldNames)
+      const updateFields = filterFieldsByNames(syncUpdateFields, tableFieldNames)
       const status = useOpenApi
         ? await openApiUpsertRecord(settings, token, createFields, updateFields)
         : await larkCliUpsertRecord(settings, createFields, updateFields)
@@ -872,6 +1229,7 @@ function runSummaryMarkdown(kind, result, reports, envValues) {
   const rows = Array.isArray(result.rows) ? result.rows : []
   const errors = Array.isArray(result.parsed?.errors) ? result.parsed.errors : []
   const baseSync = result.baseSync || {}
+  const contentOsSync = result.contentOsSync || {}
   const reportName = reportFileName(reports.md) || reportFileName(reports.csv)
   const summary = [
     `**结果**：${rows.length} 条`,
@@ -903,6 +1261,13 @@ function runSummaryMarkdown(kind, result, reports, envValues) {
     summary.push(`**飞书多维表格**：同步失败，${cleanCardText(truncateText(baseSync.error || '请检查 Base 配置和字段结构', 80))}`)
   } else {
     summary.push('**飞书多维表格**：未配置，配置 FEISHU_BASE_APP_TOKEN / FEISHU_BASE_TABLE_ID 后会自动入库。')
+  }
+  if (contentOsSync.configured && contentOsSync.synced) {
+    summary.push(`**Content OS**：已写入 ${contentOsSync.count || 0} 个内容机会`)
+  } else if (contentOsSync.configured && !contentOsSync.synced) {
+    summary.push(`**Content OS**：同步失败，${cleanCardText(truncateText(contentOsSync.error || '请检查 Supabase 配置', 80))}`)
+  } else {
+    summary.push('**Content OS**：未配置，素材雷达继续只保留本地报告和飞书结果库。')
   }
 
   return summary.join('\n')
@@ -1025,7 +1390,8 @@ async function notifyRun(kind, result) {
 async function finalizeRun(kind, result) {
   const envValues = await readLocalEnvValues()
   const baseSync = await syncRunToFeishuBase(kind, result, envValues)
-  const enriched = { ...result, baseSync }
+  const contentOsSync = await syncRunToContentOs(kind, result, envValues)
+  const enriched = { ...result, baseSync, contentOsSync }
   return { ...enriched, notification: await notifyRun(kind, enriched) }
 }
 
@@ -1201,7 +1567,8 @@ async function runDailyMonitor(reason = 'manual', overrides = {}) {
       '--fallback-route',
     ])
     const lowfanBaseSync = await syncRunToFeishuBase('lowfan', lowfanResult, envValues)
-    results.push({ kind: 'lowfan', result: { ...lowfanResult, baseSync: lowfanBaseSync } })
+    const lowfanContentOsSync = await syncRunToContentOs('lowfan', lowfanResult, envValues)
+    results.push({ kind: 'lowfan', result: { ...lowfanResult, baseSync: lowfanBaseSync, contentOsSync: lowfanContentOsSync } })
 
     const accountMonitor = config.account_monitor || {}
     const accounts = enabledAccounts(config)
@@ -1232,7 +1599,8 @@ async function runDailyMonitor(reason = 'manual', overrides = {}) {
         if (settings.transcribe) accountArgs.push('--transcribe')
         const accountResult = await runMonitorWithRows(accountArgs)
         const accountBaseSync = await syncRunToFeishuBase('account', accountResult, envValues)
-        results.push({ kind: 'account', result: { ...accountResult, baseSync: accountBaseSync } })
+        const accountContentOsSync = await syncRunToContentOs('account', accountResult, envValues)
+        results.push({ kind: 'account', result: { ...accountResult, baseSync: accountBaseSync, contentOsSync: accountContentOsSync } })
       } finally {
         await fs.rm(runConfigPath, { force: true })
       }
@@ -1250,6 +1618,7 @@ async function runDailyMonitor(reason = 'manual', overrides = {}) {
       errors: collectDailyErrors(results),
       reports: results.map((entry) => resultReportLinks(entry.result, envValues)),
       baseSync: results.map((entry) => ({ kind: entry.kind, ...entry.result.baseSync })),
+      contentOsSync: results.map((entry) => ({ kind: entry.kind, ...entry.result.contentOsSync })),
     }
 
     const webhook = process.env.FEISHU_DAILY_WEBHOOK || envValues.FEISHU_DAILY_WEBHOOK || process.env.FEISHU_RUN_WEBHOOK || envValues.FEISHU_RUN_WEBHOOK || process.env.FEISHU_FEEDBACK_WEBHOOK || envValues.FEISHU_FEEDBACK_WEBHOOK || ''
@@ -1301,11 +1670,9 @@ async function settingsStatus(config = null) {
   return {
     tikhub: {
       configured: Boolean(tikhub),
-      masked: maskSecret(tikhub),
     },
     lemonfox: {
       configured: Boolean(lemonfox),
-      masked: maskSecret(lemonfox),
     },
     transcription: {
       provider: normalizeProvider(process.env.TRANSCRIPTION_PROVIDER || transcription.provider),
@@ -1335,10 +1702,7 @@ async function settingsStatus(config = null) {
       monitorDir,
     },
     parserConfig,
-    feishuBase: {
-      configured: feishuBaseSettings(envValues).configured,
-      baseUrl: feishuBaseSettings(envValues).baseUrl,
-    },
+    feishuBase: feishuBaseStatus(envValues),
     dailyRun: dailyRunSettings(envValues),
   }
 }
@@ -1487,6 +1851,49 @@ app.post('/api/settings/runtime', async (req, res) => {
   Object.assign(process.env, updates)
   refreshRuntimeConfig()
   res.json({ ok: true, integrations: await settingsStatus() })
+})
+
+app.post('/api/settings/feishu-base', async (req, res) => {
+  const updates = normalizeFeishuBaseConfigInput(req.body || {})
+  if (!Object.keys(updates).length) {
+    res.status(400).json({ ok: false, error: '没有可保存的飞书结果库配置' })
+    return
+  }
+
+  await writeLocalEnvValues(updates)
+  Object.assign(process.env, updates)
+  const envValues = await readLocalEnvValues()
+  res.json({ ok: true, feishuBase: feishuBaseStatus(envValues) })
+})
+
+app.post('/api/settings/feishu-base/check', async (_req, res) => {
+  const envValues = await readLocalEnvValues()
+  const status = feishuBaseStatus(envValues)
+  const settings = feishuBaseSettings(envValues)
+  if (!status.setupGuide?.ready) {
+    res.json({ ok: false, check: buildFeishuBaseCheckResult(status), feishuBase: status })
+    return
+  }
+  if (!settings.openApiConfigured) {
+    res.json({
+      ok: false,
+      check: buildFeishuBaseCheckResult(status, [], '字段检查需要配置 OpenAPI App ID 和 App Secret。'),
+      feishuBase: status,
+    })
+    return
+  }
+  try {
+    const token = await feishuTenantAccessToken(settings)
+    const fieldNames = await openApiTableFieldNames(settings, token)
+    const check = buildFeishuBaseCheckResult(status, fieldNames)
+    res.json({ ok: check.ready, check, feishuBase: status })
+  } catch (error) {
+    res.json({
+      ok: false,
+      check: buildFeishuBaseCheckResult(status, [], error instanceof Error ? error.message : String(error)),
+      feishuBase: status,
+    })
+  }
 })
 
 app.post('/api/settings/thresholds', async (req, res) => {

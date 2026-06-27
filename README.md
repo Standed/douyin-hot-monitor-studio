@@ -9,6 +9,7 @@
 - 内置解析服务：Compose 默认随项目启动 `Douyin_TikTok_Download_API` 兼容容器，用于账号作品、无水印下载和登录态接口。
 - 视频与文稿归档：可下载无水印视频，并用 Lemonfox 或本地 Whisper 转写口播。
 - 运行报告：每次运行生成 JSON、CSV、Markdown，默认在 `douyin-monitor-output/runs`。
+- 飞书结果库：运行结束后可按去重键写入飞书 Base，方便团队分负责人、标处理状态和沉淀复盘。
 - 本地配置页：在网页里配置 TikHub、Lemonfox、转写方式和本地解析服务地址。
 
 ## 服务边界
@@ -97,6 +98,23 @@ TRANSCRIPTION_PROVIDER=faster-whisper
 FEISHU_FEEDBACK_WEBHOOK=
 FEISHU_FEEDBACK_FORM_URL=https://xiyangshiai.feishu.cn/share/base/form/shrcn27png3VUckWYkSEuKX3aVc
 ```
+
+### 飞书结果库
+
+低粉爆款和账号监控跑完后，可以自动写入飞书多维表格。Mac mini 负责采集和报告，飞书 Base 负责团队协作；短期不需要为了素材协作默认引入 Supabase。
+
+推荐在网页里配置：打开 `douyin.aizao.ai/settings`，找到“飞书结果库”，填入同步方式、Base Token、Table ID、飞书应用 App ID 和 App Secret 后保存。页面会写入 Mac mini 本机 `douyin-monitor-ui/.env.local`，并且只显示掩码，不会把密钥暴露在页面或报告里。
+
+```bash
+FEISHU_BASE_SYNC_MODE=auto
+FEISHU_BASE_APP_ID=
+FEISHU_BASE_APP_SECRET=
+FEISHU_BASE_APP_TOKEN=
+FEISHU_BASE_TABLE_ID=
+DY_HOT_PUBLIC_URL=https://douyin.aizao.ai
+```
+
+飞书表必须至少有 `去重键` 字段。推荐字段、视图和协作字段保护见 [docs/feishu-collaboration.md](docs/feishu-collaboration.md)。
 
 ## 推荐启动方式
 
