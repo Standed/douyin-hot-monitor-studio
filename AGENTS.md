@@ -83,6 +83,8 @@ node scripts/check-macmini-production.mjs
 - “飞书结果库”用于运营协作：Base 负责去重、负责人、处理状态、选题价值、是否采纳和日报沉淀。运营视图前几列必须优先显示标题、素材摘要、口播正文、原视频/资产链接和协作字段；`去重键`、`运行ID` 等技术字段只能隐藏保留，`视频ID` 不写入 Base。
 - 飞书结果库同步必须保护人工协作字段：`处理状态`、`负责人`、`适配账号`、`选题价值`、`内容类型`、`是否已采纳`、`选题句`、`写作角度`、`素材缺口`、`备注`、`成稿链接`、`发布链接`、`复盘结论`。这些字段只在新建记录时给默认值，后续更新不能覆盖飞书里的人工判断。
 - 飞书 Base 必须保留 `去重键` 字段；OpenAPI 同步可以按表字段自动过滤可选字段，但缺少 `去重键` 时要失败并提示，不要降级成无法去重的追加写入。
+- “接口配置 -> 飞书结果库”可以写入 `douyin-monitor-ui/.env.local`。页面状态和输入框只允许显示已配置状态和掩码；不要在日志、截图、README 或提交记录里打印完整 `FEISHU_BASE_APP_SECRET`、`FEISHU_BASE_APP_TOKEN`、`FEISHU_BASE_TABLE_ID`。飞书结果库跳转链接可以使用 Base URL。
+- 飞书结果库正式协作优先配 OpenAPI App ID/Secret + Base Token/Table ID；`lark-cli` 只作为本机调试或过渡方案，不要让团队协作依赖个人授权登录态。
 - 对标账号页面要同时支持运行账号监控和维护账号池；保存动作写回 `account_monitor.accounts`，并保留 `count_per_account`、`download_video`、`transcribe` 等运行默认值。
 - 低粉爆款和对标账号的最新结果要按报告前缀隔离：`lowfan_` 与 `account_new`。
 - 保留浅色/夜间主题切换，并用实际 DOM 状态切换，不做假按钮。

@@ -74,7 +74,19 @@ type IntegrationState = {
 
 type FeishuBaseState = {
   configured: boolean
+  openApiConfigured?: boolean
+  syncMode?: string
+  appIdConfigured?: boolean
+  appSecretConfigured?: boolean
+  appTokenConfigured?: boolean
+  tableIdConfigured?: boolean
   baseUrl: string
+  masked?: {
+    appId?: string
+    appSecret?: string
+    appToken?: string
+    tableId?: string
+  }
 }
 
 type TranscriptionSettings = {
@@ -114,7 +126,7 @@ type ThresholdSettings = {
   defaultLowFan: ConfigSummary['defaultLowFan']
 }
 
-type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | null
+type RunningAction = 'account' | 'accounts' | 'lowfan' | 'session' | 'integrations' | 'runtime' | 'thresholds' | 'feishuBase' | null
 
 type ConfigSummary = {
   accountCount: number
@@ -282,7 +294,14 @@ const defaultData: DashboardData = {
       },
       feishuBase: {
         configured: false,
+        openApiConfigured: false,
+        syncMode: 'auto',
+        appIdConfigured: false,
+        appSecretConfigured: false,
+        appTokenConfigured: false,
+        tableIdConfigured: false,
         baseUrl: '',
+        masked: {},
       },
       parserConfig: {
         configured: false,
@@ -307,6 +326,11 @@ const providerOptions = [
   { label: '本地 faster-whisper', value: 'faster-whisper' },
   { label: '本地 Whisper', value: 'whisper' },
   { label: 'Lemonfox 云端', value: 'lemonfox' },
+]
+const feishuBaseSyncModeOptions = [
+  { label: '自动：优先 OpenAPI，缺凭证时用 lark-cli', value: 'auto' },
+  { label: 'OpenAPI：使用飞书应用凭证', value: 'openapi' },
+  { label: 'lark-cli：使用本机飞书授权', value: 'lark-cli' },
 ]
 
 type PageId = 'overview' | 'lowfan' | 'accounts' | 'settings' | 'reports' | 'ops' | 'about' | 'feedback'
@@ -573,6 +597,11 @@ function App() {
   const [localApiBase, setLocalApiBase] = useState('')
   const [pythonBin, setPythonBin] = useState('')
   const [monitorDir, setMonitorDir] = useState('')
+  const [feishuBaseAppId, setFeishuBaseAppId] = useState('')
+  const [feishuBaseAppSecret, setFeishuBaseAppSecret] = useState('')
+  const [feishuBaseAppToken, setFeishuBaseAppToken] = useState('')
+  const [feishuBaseTableId, setFeishuBaseTableId] = useState('')
+  const [feishuBaseSyncMode, setFeishuBaseSyncMode] = useState('auto')
   const [transcriptionProvider, setTranscriptionProvider] = useState('faster-whisper')
   const [transcriptionLanguage, setTranscriptionLanguage] = useState('zh')
   const [localModel, setLocalModel] = useState('small')
@@ -654,6 +683,9 @@ function App() {
       setLocalApiBase(runtime.localApiBase || '')
       setPythonBin(runtime.pythonBin || '')
       setMonitorDir(runtime.monitorDir || '')
+    }
+    if (dashboard.config.integrations?.feishuBase) {
+      setFeishuBaseSyncMode(dashboard.config.integrations.feishuBase.syncMode || 'auto')
     }
   }
 
@@ -821,6 +853,47 @@ function App() {
       }
     } catch (error) {
       setLastRun(createRunError('POST /api/settings/runtime', error))
+    } finally {
+      setRunning(null)
+    }
+  }
+
+  async function saveFeishuBase() {
+    setRunning('feishuBase')
+    try {
+      const result = await api<{ ok: boolean; feishuBase: FeishuBaseState; error?: string }>('/api/settings/feishu-base', {
+        method: 'POST',
+        body: JSON.stringify({
+          syncMode: feishuBaseSyncMode,
+          appId: feishuBaseAppId,
+          appSecret: feishuBaseAppSecret,
+          appToken: feishuBaseAppToken,
+          tableId: feishuBaseTableId,
+        }),
+      })
+      setLastRun({
+        ok: Boolean(result.ok),
+        command: 'POST /api/settings/feishu-base',
+        code: result.ok ? 0 : 1,
+        stdout: result.ok ? '飞书结果库配置已保存' : '',
+        stderr: result.error || '',
+      })
+      setFeishuBaseAppId('')
+      setFeishuBaseAppSecret('')
+      setFeishuBaseAppToken('')
+      setFeishuBaseTableId('')
+      setData((current) => ({
+        ...current,
+        config: {
+          ...current.config,
+          integrations: {
+            ...normalizeIntegrations(current.config),
+            feishuBase: result.feishuBase,
+          },
+        },
+      }))
+    } catch (error) {
+      setLastRun(createRunError('POST /api/settings/feishu-base', error))
     } finally {
       setRunning(null)
     }
@@ -1204,6 +1277,21 @@ function App() {
               setLocalApiBase={setLocalApiBase}
               setMonitorDir={setMonitorDir}
               setPythonBin={setPythonBin}
+            />
+            <FeishuBasePanel
+              appId={feishuBaseAppId}
+              appSecret={feishuBaseAppSecret}
+              appToken={feishuBaseAppToken}
+              feishuBase={integrations.feishuBase}
+              running={running}
+              saveFeishuBase={saveFeishuBase}
+              setAppId={setFeishuBaseAppId}
+              setAppSecret={setFeishuBaseAppSecret}
+              setAppToken={setFeishuBaseAppToken}
+              setSyncMode={setFeishuBaseSyncMode}
+              setTableId={setFeishuBaseTableId}
+              syncMode={feishuBaseSyncMode}
+              tableId={feishuBaseTableId}
             />
             <SessionPanel parserConfig={integrations.parserConfig} running={running} saveSession={saveSession} sessionid={sessionid} setSessionid={setSessionid} />
           </section>
@@ -1830,6 +1918,85 @@ function RuntimePanel({
         <Button className="full-action" variant="ghost" onClick={saveRuntime} disabled={running !== null}>
           {running === 'runtime' ? <Loader2 className="size-4 animate-spin" /> : <Server className="size-4" />}
           保存后台配置
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+function FeishuBasePanel({
+  appId,
+  appSecret,
+  appToken,
+  feishuBase,
+  running,
+  saveFeishuBase,
+  setAppId,
+  setAppSecret,
+  setAppToken,
+  setSyncMode,
+  setTableId,
+  syncMode,
+  tableId,
+}: {
+  appId: string
+  appSecret: string
+  appToken: string
+  feishuBase?: FeishuBaseState
+  running: RunningAction
+  saveFeishuBase: () => void
+  setAppId: (value: string) => void
+  setAppSecret: (value: string) => void
+  setAppToken: (value: string) => void
+  setSyncMode: (value: string) => void
+  setTableId: (value: string) => void
+  syncMode: string
+  tableId: string
+}) {
+  const configured = Boolean(feishuBase?.configured)
+  const missing = [
+    feishuBase?.appTokenConfigured ? '' : 'Base Token',
+    feishuBase?.tableIdConfigured ? '' : 'Table ID',
+    syncMode === 'openapi' && !feishuBase?.openApiConfigured ? 'App ID / Secret' : '',
+  ].filter(Boolean)
+
+  return (
+    <Card className="control-card settings-card">
+      <CardContent>
+        <PanelTitle icon={Database} title="飞书结果库" />
+        <p className="panel-copy">用于把低粉爆款和账号监控结果写入飞书 Base。这里保存到 Mac mini 本机环境变量；留空的密钥不会覆盖已有配置。</p>
+        <div className="base-status-row">
+          <StatusPill icon={Database} label="Base" value={configured ? '已配置' : '未配置'} tone={configured ? 'good' : 'warn'} />
+          <StatusPill icon={ShieldCheck} label="缺少" value={missing.length ? missing.join(' / ') : '无'} tone={missing.length ? 'warn' : 'good'} />
+        </div>
+        {feishuBase?.baseUrl && (
+          <div className="feedback-actions">
+            <a className="feedback-link feedback-link-primary" href={feishuBase.baseUrl} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+              打开飞书结果库
+            </a>
+          </div>
+        )}
+        <div className="form-grid">
+          <Field label="同步方式" help="推荐自动模式。OpenAPI 更稳定；lark-cli 适合本机已有飞书授权的临时兜底。">
+            <Select value={syncMode} onChange={setSyncMode} options={feishuBaseSyncModeOptions} />
+          </Field>
+          <Field label="Base Token" help="飞书多维表格链接里的 bascn...；这是结果库地址，不是应用密钥。">
+            <Input value={appToken} onChange={(event) => setAppToken(event.target.value)} placeholder={feishuBase?.appTokenConfigured ? `${feishuBase.masked?.appToken || '已配置'}，留空不修改` : 'bascn...'} type="password" />
+          </Field>
+          <Field label="Table ID" help="飞书表格的数据表 ID，通常是 tbl...。">
+            <Input value={tableId} onChange={(event) => setTableId(event.target.value)} placeholder={feishuBase?.tableIdConfigured ? `${feishuBase.masked?.tableId || '已配置'}，留空不修改` : 'tbl...'} type="password" />
+          </Field>
+          <Field label="App ID" help="OpenAPI 模式需要；自动模式下填了会优先使用 OpenAPI。">
+            <Input value={appId} onChange={(event) => setAppId(event.target.value)} placeholder={feishuBase?.appIdConfigured ? `${feishuBase.masked?.appId || '已配置'}，留空不修改` : 'cli_...'} type="password" />
+          </Field>
+          <Field label="App Secret" help="只保存在本机 .env.local，不会显示在页面、报告或飞书卡片里。">
+            <Input value={appSecret} onChange={(event) => setAppSecret(event.target.value)} placeholder={feishuBase?.appSecretConfigured ? '已配置，留空不修改' : '仅在本机保存'} type="password" />
+          </Field>
+        </div>
+        <Button className="full-action" variant="secondary" onClick={saveFeishuBase} disabled={running !== null}>
+          {running === 'feishuBase' ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
+          保存飞书结果库配置
         </Button>
       </CardContent>
     </Card>

@@ -103,6 +103,8 @@ FEISHU_FEEDBACK_FORM_URL=https://xiyangshiai.feishu.cn/share/base/form/shrcn27pn
 
 低粉爆款和账号监控跑完后，可以自动写入飞书多维表格。Mac mini 负责采集和报告，飞书 Base 负责团队协作；短期不需要为了素材协作默认引入 Supabase。
 
+推荐在网页里配置：打开 `douyin.aizao.ai/settings`，找到“飞书结果库”，填入同步方式、Base Token、Table ID、飞书应用 App ID 和 App Secret 后保存。页面会写入 Mac mini 本机 `douyin-monitor-ui/.env.local`，并且只显示掩码，不会把密钥暴露在页面或报告里。
+
 ```bash
 FEISHU_BASE_SYNC_MODE=auto
 FEISHU_BASE_APP_ID=

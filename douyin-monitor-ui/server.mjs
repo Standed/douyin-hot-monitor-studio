@@ -6,6 +6,7 @@ import { constants as fsConstants } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { feishuBaseStatusFromEnv, maskSecret, normalizeFeishuBaseConfigInput } from './server/feishu-base-config.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const defaultMonitorDir = path.resolve(__dirname, '../douyin-monitor')
@@ -366,13 +367,6 @@ function parseMonitorOutput(stdout) {
   }
 }
 
-function maskSecret(value) {
-  if (!value) return ''
-  const normalized = String(value).trim()
-  if (normalized.length <= 10) return '已配置'
-  return `${normalized.slice(0, 6)}...${normalized.slice(-4)}`
-}
-
 async function readLocalEnvValues() {
   const envPath = path.join(__dirname, '.env.local')
   const values = {}
@@ -486,6 +480,19 @@ function feishuBaseSettings(envValues = {}) {
     tableId,
     baseUrl: baseToken ? `https://xiyangshiai.feishu.cn/base/${baseToken}` : '',
   }
+}
+
+function feishuBaseStatus(envValues = {}) {
+  return feishuBaseStatusFromEnv({
+    ...envValues,
+    FEISHU_BASE_SYNC_MODE: process.env.FEISHU_BASE_SYNC_MODE || envValues.FEISHU_BASE_SYNC_MODE,
+    FEISHU_BASE_APP_ID: process.env.FEISHU_BASE_APP_ID || envValues.FEISHU_BASE_APP_ID,
+    FEISHU_BASE_APP_SECRET: process.env.FEISHU_BASE_APP_SECRET || envValues.FEISHU_BASE_APP_SECRET,
+    FEISHU_BASE_APP_TOKEN: process.env.FEISHU_BASE_APP_TOKEN || envValues.FEISHU_BASE_APP_TOKEN || process.env.FEISHU_BASE_TOKEN || envValues.FEISHU_BASE_TOKEN,
+    FEISHU_BASE_TABLE_ID: process.env.FEISHU_BASE_TABLE_ID || envValues.FEISHU_BASE_TABLE_ID,
+    LARK_APP_ID: process.env.LARK_APP_ID || envValues.LARK_APP_ID,
+    LARK_APP_SECRET: process.env.LARK_APP_SECRET || envValues.LARK_APP_SECRET,
+  })
 }
 
 function contentOsSettings(envValues = {}) {
@@ -1688,10 +1695,7 @@ async function settingsStatus(config = null) {
       monitorDir,
     },
     parserConfig,
-    feishuBase: {
-      configured: feishuBaseSettings(envValues).configured,
-      baseUrl: feishuBaseSettings(envValues).baseUrl,
-    },
+    feishuBase: feishuBaseStatus(envValues),
     dailyRun: dailyRunSettings(envValues),
   }
 }
@@ -1840,6 +1844,19 @@ app.post('/api/settings/runtime', async (req, res) => {
   Object.assign(process.env, updates)
   refreshRuntimeConfig()
   res.json({ ok: true, integrations: await settingsStatus() })
+})
+
+app.post('/api/settings/feishu-base', async (req, res) => {
+  const updates = normalizeFeishuBaseConfigInput(req.body || {})
+  if (!Object.keys(updates).length) {
+    res.status(400).json({ ok: false, error: '没有可保存的飞书结果库配置' })
+    return
+  }
+
+  await writeLocalEnvValues(updates)
+  Object.assign(process.env, updates)
+  const envValues = await readLocalEnvValues()
+  res.json({ ok: true, feishuBase: feishuBaseStatus(envValues) })
 })
 
 app.post('/api/settings/thresholds', async (req, res) => {

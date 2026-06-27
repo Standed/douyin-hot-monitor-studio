@@ -98,6 +98,14 @@ DY_HOT_PUBLIC_URL=https://douyin.aizao.ai
 
 `DY_HOT_PUBLIC_URL` 用来生成可点击的 Markdown 报告、CSV 报告、无水印视频和口播文稿链接。
 
+## 网页配置入口
+
+管理员可以在 `douyin.aizao.ai/settings` 的“飞书结果库”面板里配置同步方式、Base Token、Table ID、飞书应用 App ID 和 App Secret。保存后配置会写入 Mac mini 本机 `douyin-monitor-ui/.env.local`。
+
+- 留空的密钥字段不会覆盖已有配置，方便只调整同步方式或补单个字段。
+- 页面配置状态和输入框只展示是否已配置和掩码，不在状态文案里展示完整 App Secret、Base Token 或 Table ID；“打开飞书结果库”链接会使用 Base URL。
+- `auto` 模式优先使用 OpenAPI；如果缺少 OpenAPI 凭证，才回落到本机 `lark-cli`。正式协作建议配齐 OpenAPI，避免依赖个人登录状态。
+
 ## 协作字段保护
 
 以下字段只在新建记录时写默认值，后续同步不会覆盖：
